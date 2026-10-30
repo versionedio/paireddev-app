@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PairedDev HLD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css?v=3">
+</head>
+<body>
+<main>
+<div class="eyebrow">High-level design</div>
+<h1>How PairedDev works on nostackai</h1>
+<p class="lede">A static front-end talks to one nostackai org (<code>paired-egih</code>) over its app API. Everything the backend does — data, rules, agents, git — is an Entity, Logic Block, Glyph, Crew, Event, Schedule or Connector defined through MCP. No nostackai source is touched.</p>
+
+<div class="callout warn"><b>Terminology trap.</b> The requirements say “org” for a customer company (org-managed hooks, org providers). In nostackai that is a <b>tenant</b>. The nostackai <b>org</b> (<code>paired-egih</code>) is PairedDev the product. This pack always says <i>tenant</i> for a customer company and <i>nostackai org</i> for the vendor. “Org-managed hooks” become <i>tenant-admin-managed hooks</i>.</div>
+
+<h2 id="context">1 · System context</h2>
+<p>Three kinds of actor, one backend. Agents are never given board-wide tokens: Muse Code runs on a GitHub runner and reports back through GitHub webhooks and the connector, and every state change is made by a Logic Block that checks who is asking.</p>
+<figure class="fig"><figcaption>Fig 1 · Context</figcaption><div class="body">
+<pre class="mermaid">
+flowchart TB
+  classDef human fill:#3b5b9a,stroke:#7da2e8,color:#fff
+  classDef ai fill:#9a6a1f,stroke:#e0a850,color:#fff
+  classDef ext fill:#1f6f78,stroke:#59c2cc,color:#fff
+  classDef sys fill:#4a5166,stroke:#8b93a7,color:#fff
+  classDef data fill:#5d4a8a,stroke:#a58fe0,color:#fff
+
+  REQ["Requester<br/>portal: submit, vote"]:::human
+  DEV["Dev / Product owner<br/>board, gates, release"]:::human
+  FE["PairedDev front-end<br/>Next.js static export<br/>S3 + CloudFront"]:::sys
+  subgraph NS["nostackai org paired-egih · app API dd1use2.nostackai.com/app/paired-egih"]
+    direction TB
+    AUTH["Sign-in + ACL<br/>tenant from token"]:::sys
+    ENT[("Entities<br/>27 tenant-scoped tables")]:::data
+    LB["Logic Blocks<br/>all writes + gates"]:::sys
+    GLY["Glyphs<br/>metrics, snapshots, seed"]:::sys
+    CREW["Crews<br/>planner, reviewer, pre-flight"]:::ai
+    EVT["Events + Schedules"]:::sys
+    WS["WebSocket gateway<br/>progress + activity"]:::sys
+    FF["Feature flags"]:::sys
+  end
+  GH["GitHub connector<br/>personal + shared instances"]:::ext
+  CC["Muse Code connector<br/>GitHub runner"]:::ext
+  AIP["AI providers<br/>Anthropic, Gemini"]:::ai
+  CHAT["Slack + Email connectors"]:::ext
+  AWS["AWS connector<br/>CloudFormation stacks"]:::ext
+  REPO[("Customer repo<br/>CLAUDE.md, skills, hooks")]:::ext
+
+  REQ --> FE
+  DEV --> FE
+  FE -->|"REST: client_id, x-api-key, Bearer"| AUTH
+  AUTH --> LB
+  AUTH --> ENT
+  FE <-->|"wss: customapi_run, crew_run"| WS
+  FE -->|"evaluate"| FF
+  LB --> ENT
+  LB --> GLY
+  LB --> CREW
+  LB --> GH
+  LB --> CC
+  LB --> AIP
+  CREW --> AIP
+  EVT --> LB
+  EVT --> CHAT
+  GH <-->|"API + webhooks"| REPO
+  CC -->|"dispatch workflow"| REPO
+  GH -->|"landed as repo_event"| ENT
+  AWS -.->|"hosts"| FE
+</pre></div></figure>
+
+<h2 id="layers">2 · Layers and what lives where</h2>
+<div class="tw"><table>
+<thead><tr><th>Layer</th><th>Built with</th><th>Owns</th><th>Must not</th></tr></thead>
+<tbody>
+<tr><td>Front-end</td><td>Next.js static export, TypeScript, Capacitor later (see <code>.claude/skills</code>)</td><td>Layout, config-driven screens, view models, flag-gated features</td><td>Hold business rules. It may hide a button; the backend decides.</td></tr>
+<tr><td>App API</td><td>nostackai <code>/app/paired-egih/*</code></td><td>Auth, ACL, auto-generated entity CRUD, Logic Block routes, WebSocket</td><td>—</td></tr>
+<tr><td>Entities</td><td><code>create_entity</code></td><td>Every record, per tenant. Direct writes denied on governed tables.</td><td>Be edited around the blocks that guard them.</td></tr>
+<tr><td>Logic Blocks</td><td><code>create_logicblock</code></td><td>Every state transition, vote, sign-off, gate, bulk action, git operation</td><td>Contain heavy compute; hand it to a Glyph.</td></tr>
+<tr><td>Glyphs</td><td>JavaScript (Node 22)</td><td>Metrics series, daily flow snapshots, hook-file rendering, tenant bootstrap, seeding</td><td>Store data or replace an Entity.</td></tr>
+<tr><td>Crews</td><td><code>create_crew</code></td><td>Plan writing, checklist pre-check, pre-flight reasoning</td><td>Write board state without a human-approved tool.</td></tr>
+<tr><td>Connectors</td><td><code>setup_connector</code></td><td>GitHub, Muse Code runner, Slack, Email, S3, AWS</td><td>Hold secrets in assets. Credentials are per tenant, entered in the console.</td></tr>
+</tbody></table></div>
+
+<h2 id="tenancy">3 · Multi-tenancy</h2>
+<p>One nostackai org serves many customer tenants. The tenant is derived from the signed-in user's token, so no screen, block or query ever passes a tenant id. The same Entities, Logic Blocks and Crews exist for every tenant; the data, credentials, AI keys, GitHub tokens, hooks and flag overrides are the tenant's own.</p>
+<figure class="fig"><figcaption>Fig 2 · Org, tenants, and what is shared</figcaption><div class="body">
+<pre class="mermaid">
+flowchart TB
+  classDef shared fill:#4a5166,stroke:#8b93a7,color:#fff
+  classDef tenant fill:#3b5b9a,stroke:#7da2e8,color:#fff
+  classDef secret fill:#9a3b3b,stroke:#e08a8a,color:#fff
+  ORG["nostackai org paired-egih<br/>definitions shared by all tenants"]:::shared
+  ORG --> A1["Entities · Logic Blocks · Glyphs · Crews<br/>Events · Schedules · Flag definitions · Email templates"]:::shared
+  ORG --> T1["Tenant 2vrdf (exists)"]:::tenant
+  ORG --> T2["Tenant acme (future)"]:::tenant
+  ORG --> T3["Tenant northwind (future)"]:::tenant
+  T1 --> D1["Records: projects, items, audit, sessions"]:::tenant
+  T1 --> U1["Users + ACL policies + default member access"]:::tenant
+  T1 --> S1["Tenant Settings: General, AI keys, connector credentials, webhook secret"]:::secret
+  T1 --> F1["Flag overrides"]:::tenant
+  T2 --> D2["Own records, users, keys, repos"]:::tenant
+</pre></div></figure>
+<ul>
+<li><b>Onboarding a tenant</b> is partly console-only: nostackai has no MCP tool to create a tenant. See <a href="gaps.html#g-tenant">gap G-04</a> and the onboarding runbook in the <a href="build-plan.html#onboard">build plan</a>.</li>
+<li><b>Per-tenant vs shared values.</b> Anything that differs per tenant (repo owner, Slack channel, GitHub token, provider key) is read through <code>{{params.settings.KEY}}</code> or a connector, never written into a block (<code>valueScopeGuide</code>).</li>
+<li><b>Anonymous access.</b> The portal needs a signed-in requester. A no-login route cannot know which tenant it serves. See <a href="gaps.html#g-public">G-12</a>.</li>
+</ul>
+
+<h2 id="lifecycle">4 · Card lifecycle and the three gates</h2>
+<p>Seven lanes. Lane changes are not column drags against the table; they are calls to <code>move-item</code> or <code>advance-item</code>, which return 409 when a gate is closed.</p>
+<figure class="fig"><figcaption>Fig 3 · Lane state machine</figcaption><div class="body">
+<pre class="mermaid">
+stateDiagram-v2
+  direction LR
+  [*] --> backlog: submit-request
+  backlog --> assigned: owner set
+  assigned --> inprogress: plan approved + session started
+  inprogress --> review: PR opened
+  review --> testing: checklist fully signed (GATE 1)
+  testing --> staged: CI green
+  staged --> done: release pre-flight cleared + human promote (GATE 2 / 3)
+  inprogress --> assigned: plan sent back
+  review --> inprogress: changes requested
+  done --> [*]
+  note right of review
+    GATE 1 card checklist: every item needs a human signature.
+    Untouched-by-agent cards are not gated.
+  end note
+  note right of staged
+    GATE 2 release pre-flight per project.
+    GATE 3 cross-project pre-flight for Gated deliveries.
+  end note
+</pre></div></figure>
+
+<h2 id="journey">5 · End-to-end: request to merged code</h2>
+<figure class="fig"><figcaption>Fig 4 · Happy path</figcaption><div class="body">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  actor R as Requester
+  actor O as Owner (human)
+  participant FE as Front-end
+  participant LB as Logic Blocks
+  participant DB as Entities
+  participant AI as ai_call / Crew
+  participant GH as GitHub connector
+  participant CC as Muse Code runner
+  R->>FE: submit request
+  FE->>LB: submit-request
+  LB->>DB: create work_item (backlog), audit_event
+  O->>FE: Ask Claude to triage
+  FE->>LB: run-triage
+  LB->>AI: classify + score each unlabelled item
+  LB->>DB: tags, impact, effort, score (formula)
+  O->>FE: Start work
+  FE->>LB: request-plan
+  LB->>AI: planner crew (read-only repo access)
+  AI-->>DB: plan (files, order, risks) status=awaiting
+  O->>FE: Approve plan
+  FE->>LB: approve-plan (human only)
+  LB->>GH: create_branch (unique per card)
+  LB->>CC: start_task(prompt, branch, model)
+  CC->>GH: commits, opens PR on runner
+  GH-->>DB: webhook lands as repo_event
+  DB-->>LB: event: apply-repo-event
+  LB->>DB: PR fields, CI strip, pill, activity, audit
+  LB->>AI: reviewer crew pre-checks checklist, comments as COMMENT
+  O->>FE: sign off each item
+  FE->>LB: signoff-checklist (rejects agent identities)
+  O->>FE: Advance, then Merge
+  FE->>LB: merge-pr (human only, expected head SHA)
+  LB->>GH: merge_pull_request
+  GH-->>DB: pull_request.closed lands, item to done
+</pre></div></figure>
+
+<h2 id="trust">6 · Enforcing “agents never sign off or merge”</h2>
+<p>This is requirement 4 and it has to hold on the server. nostackai ACL only sees the route name, never the request body, so the rule is built from three layers rather than one.</p>
+<figure class="fig"><figcaption>Fig 5 · Defence in depth</figcaption><div class="body">
+<pre class="mermaid">
+flowchart TB
+  classDef ok fill:#2f6b46,stroke:#6fd29a,color:#fff
+  classDef bad fill:#9a3b3b,stroke:#e08a8a,color:#fff
+  classDef sys fill:#4a5166,stroke:#8b93a7,color:#fff
+  C["Call: signoff-checklist / merge-pr / advance-item"]:::sys
+  C --> L1{"Layer 1: ACL<br/>agent policy has no Allow for these routes"}
+  L1 -- "agent identity" --> X1["403 from API Gateway"]:::bad
+  L1 -- "human identity" --> L2{"Layer 2: Logic Block<br/>member.kind == human?"}
+  L2 -- "agent / unknown" --> X2["403 + audit_event denied"]:::bad
+  L2 -- "human" --> L3{"Layer 3: business rule<br/>gate state, expected SHA, owner role"}
+  L3 -- "closed" --> X3["409 gate not cleared"]:::bad
+  L3 -- "open" --> OK["Write + audit_event"]:::ok
+</pre></div></figure>
+<ul>
+<li>Layer 1 works because each restricted operation is its own Logic Block, so it has its own action name a policy can deny.</li>
+<li>Governed entities (<code>work_item</code>, <code>checklist_item</code>, <code>audit_event</code>, <code>plan</code>, <code>agent_session</code>) have direct create/update/delete denied for every role. Blocks are the only route in, which is the board-policy pattern from the case study.</li>
+<li><code>audit_event</code> is created with <code>excludeOps: ["update","delete"]</code>, so append-only is a property of the table's API, not a convention.</li>
+</ul>
+
+<h2 id="webhook">7 · GitHub events keep cards in step</h2>
+<p>The requirements say webhooks “update <code>work_item</code>”. We land them in a dedicated append-only <code>repo_event</code> table first, then a block applies them. That keeps the raw delivery for debugging, makes replays idempotent, and lets one event touch several tables (item, CI strip, activity, audit).</p>
+<figure class="fig"><figcaption>Fig 6 · Inbound webhook</figcaption><div class="body">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant GH as GitHub
+  participant CN as GitHub connector webhook
+  participant RE as repo_event (entity)
+  participant EV as Event: after create
+  participant LB as apply-repo-event
+  participant WI as work_item and friends
+  participant WS as WebSocket
+  GH->>CN: POST (X-Hub-Signature-256, X-GitHub-Delivery)
+  CN->>CN: verify HMAC with tenant webhook secret
+  CN->>RE: land: delivery id, type, branch, payload fields
+  RE->>EV: entity create fires
+  EV->>LB: custom_api, field_mapping from source fields
+  LB->>WI: find item by branch (fallback PR url), update pill, CI strip, PR state
+  LB->>WI: write activity_entry + audit_event
+  LB-->>WS: notifyall to project channel
+</pre></div></figure>
+
+<h2 id="realtime">8 · Streaming and live status</h2>
+<p>nostackai offers a WebSocket gateway, not SSE. Cards, pills and the activity feed update through it. The agent session panel is the one place the design cannot be matched exactly; see <a href="gaps.html#g-stream">G-01</a>.</p>
+<figure class="fig"><figcaption>Fig 7 · Live updates</figcaption><div class="body">
+<pre class="mermaid">
+flowchart LR
+  classDef sys fill:#4a5166,stroke:#8b93a7,color:#fff
+  classDef ai fill:#9a6a1f,stroke:#e0a850,color:#fff
+  classDef ext fill:#1f6f78,stroke:#59c2cc,color:#fff
+  B["Browser tab"]:::sys -->|"customapi_run get-item-feed<br/>channel proj:ID unguessable"| G["WebSocket gateway"]:::sys
+  B -->|"crew_run planner"| G
+  B -->|"agent_activity_subscribe"| G
+  G --> LB["Logic Block"]:::sys
+  LB -->|"notifyall = true"| G
+  G -->|"customapi_message to everyone on channel"| B2["Other tabs"]:::sys
+  CREW["Crew turns"]:::ai -->|"every turn event"| G
+  GHW["GitHub webhook"]:::ext --> LB
+  SCH["Schedule: sync-sessions"]:::sys --> LB
+</pre></div></figure>
+
+<h2 id="metrics">9 · Metrics pipeline</h2>
+<p>Burndown, velocity and cumulative flow need history that the live tables do not keep. We record it from day one: every lane change writes a <code>lane_transition</code> row, and a nightly schedule writes a <code>flow_snapshot</code> with per-lane counts. A Glyph turns those into series for any <code>from</code>/<code>to</code>.</p>
+<figure class="fig"><figcaption>Fig 8 · From transitions to charts</figcaption><div class="body">
+<pre class="mermaid">
+flowchart LR
+  classDef sys fill:#4a5166,stroke:#8b93a7,color:#fff
+  classDef data fill:#5d4a8a,stroke:#a58fe0,color:#fff
+  classDef ai fill:#9a6a1f,stroke:#e0a850,color:#fff
+  MV["move-item / advance-item"]:::sys --> LT[("lane_transition")]:::data
+  SCH["Schedule daily 00:05"]:::sys --> SNAP["glyph pd_snapshot_flow"]:::sys --> FS[("flow_snapshot")]:::data
+  LT --> M["glyph pd_metrics"]:::sys
+  FS --> M
+  SP[("sprint")]:::data --> M
+  M --> API["get-metrics block<br/>flow, cycle-time, throughput, aging, burndown, velocity"]:::sys
+  API --> FE["Charts: SVG in the front-end"]:::sys
+  LT --> RD["retro-digest block"]:::sys --> AI["ai_call summarize"]:::ai
+  AL[("audit_event")]:::data --> RD
+</pre></div></figure>
+
+<h2 id="nfr">10 · Cross-cutting</h2>
+<div class="tw"><table>
+<thead><tr><th>Concern</th><th>Approach</th></tr></thead>
+<tbody>
+<tr><td>Audit</td><td>Every block that changes state ends in a <code>create_entity audit_event</code> step. The table has no update or delete route.</td></tr>
+<tr><td>Feature flags</td><td>Every screen and agent capability has an org-defined flag (<a href="integrations.html#flags">list</a>). The front-end calls <code>POST /featureflags/evaluate</code> once at start-up; blocks read <code>{{params.flags.KEY}}</code> and default to off.</td></tr>
+<tr><td>Scale</td><td>Backlog list is a block with server-side filters, sort, cursor paging and a separate count call. Entity scans stop near 2,000 rows, so large tenants need the indexes in <a href="data-model.html#indexes">Entities</a>. See <a href="gaps.html#g-list">G-06</a>.</td></tr>
+<tr><td>Errors</td><td>Blocks return one envelope <code>{code, message, requestId}</code>; the front-end <code>AppError</code> adapter (api-data-layer skill) maps it.</td></tr>
+<tr><td>Observability</td><td>Communication audit and <code>list_event_deliveries</code> / <code>list_connector_logs</code> for back-end tracing; the front-end shows the request id (observability skill).</td></tr>
+<tr><td>Environments</td><td>MCP reaches the <b>dev</b> tier only. Production needs a paid plan, a provisioned Production environment and a console deploy. See <a href="gaps.html#g-prod">G-14</a>.</td></tr>
+<tr><td>Rate / cost</td><td>Each record write counts as an API call. Bulk actions on 100+ items cost 100+ calls; limits are plan-based.</td></tr>
+</tbody></table></div>
+</main>
+<script src="assets/docs.js?v=3"></script>
+</body>
+</html>

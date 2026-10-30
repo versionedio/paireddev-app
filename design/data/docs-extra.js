@@ -1,0 +1,52 @@
+// Help-page copy that sits beside data/docs.js: when to use a page, the rules it enforces, and where to go next.
+// Keyed by the same page ids as PAGE_DOCS. Data only.
+export const OVERVIEW = {
+  title: 'How PairedDev works',
+  objective: 'PairedDev is a board where people and Claude build software side by side. Requests come in through the portal, get scored in triage, and move across seven lanes to Done. Claude can plan, code and pre-check reviews, but a named human owns every card and only a human can sign off or advance it.',
+  actors: [{ name: 'Requester', kind: 'human' }, { name: 'Product owner', kind: 'human' }, { name: 'Developer', kind: 'human' }, { name: 'Claude', kind: 'agent' }, { name: 'nostackai', kind: 'system' }],
+  cases: [
+    { text: 'Ask for something and vote on what matters', by: [0] }, { text: 'Decide what is next, later or never', by: [1] },
+    { text: 'Own a card and make the calls on it', by: [1, 2] }, { text: 'Plan, code and pre-check a review (never sign off)', by: [3] },
+    { text: 'Score, route, audit and gate every transition', by: [4] },
+  ],
+  flow: [
+    { kind: 'start', text: 'Request submitted in the Portal' }, { kind: 'step', who: 'Claude', text: 'Triage: estimates impact and effort, labels the item' },
+    { kind: 'step', who: 'Product owner', text: 'Slots it into Next or Later, then assigns an owner' },
+    { kind: 'step', who: 'Developer / Claude', text: 'Plan, approve the plan, supervised coding session' },
+    { kind: 'decision', text: 'Review checklist signed by a human?', yes: 'Advance through testing and staging', no: 'Card stays put; the gate is locked' },
+    { kind: 'end', text: 'Released and visible to the requester' },
+  ],
+  endpoints: [],
+  when: 'Read this first if you are new. The other help pages each explain one screen.',
+  rules: ['Humans are orange, Claude is violet, the system is grey, on every diagram and badge.', 'Claude never signs off a checklist, advances a card, or releases.', 'Every change is written to Activity with who did it.'],
+  related: ['portal', 'triage', 'board'],
+};
+
+export const DOC_EXTRA = {
+  portal: { when: 'Use it to ask for a change or check where yours stands. Owners use it to see what people are voting for.',
+    rules: ['A title needs at least 6 characters.', 'You can vote once per request; voting again removes your vote.', 'New requests start in Backlog with no AI labels.'], related: ['triage', 'backlog'] },
+  backlog: { when: 'Use it when the list is too long for Triage: searching, bulk tagging, or moving many items at once.',
+    rules: ['50 rows per page.', 'Bulk actions apply to every ticked row.', 'Opening a row shows the same drawer as the board.'], related: ['triage', 'deliveries'] },
+  triage: { when: 'Use it as a short weekly ritual on new intake, not as a long-term list.',
+    rules: ['Score = votes (up to 45) + impact (up to 32) + inverted effort (up to 16).', 'Claude only labels items that have no labels yet.', 'Dragging a card only changes its bucket; it does not start work.'], related: ['backlog', 'board'] },
+  board: { when: 'Use it every day. It is the one place that shows what is in flight, who owns it and what is blocked.',
+    rules: ['Seven lanes, left to right: Backlog, Assigned, In Progress, Code Review, Integration Testing, Staged, Done.', 'Each card has exactly one human owner and any number of workers.', 'A card cannot leave Code Review until its checklist is fully signed off by a human.', 'On touch screens use the Move to menu instead of dragging.'], related: ['drawer', 'releases'] },
+  drawer: { when: 'Opens from any card. It is where the actual work on one card happens.',
+    rules: ['Claude plans first and writes nothing until a human approves the plan.', 'A hook set to ask pauses the live session until a human approves or denies.', 'Sending a plan back needs a note so Claude knows what to change.', 'Sign-off and Advance are disabled for agents.'], related: ['board', 'agent'] },
+  deliveries: { when: 'Use it when work from several projects must go out together, or when you need a single view of a release.',
+    rules: ['Gated: one combined gate; nothing ships until it clears.', 'Rollup: read-only view grouped by project, no gate.', 'Groups are standing containers of projects; deliveries are one-off and can span any project.'], related: ['releases', 'board'] },
+  releases: { when: 'Use it before promoting: it shows CI status per environment and checks staged branches against each other.',
+    rules: ['Integration promotes to Staging automatically when tests pass.', 'Staging to Production is always a human decision.', 'Overlapping files lock the gate until a human settles the order.'], related: ['deliveries', 'activity'] },
+  activity: { when: 'Use it to answer who did what, and when, especially for anything Claude did.',
+    rules: ['Append-only: entries cannot be edited or deleted.', 'Each entry records actor, target, branch and detail.'], related: ['analytics', 'team'] },
+  sprints: { when: 'Only appears when Cadence (settings) is 1 to 4 weeks. Flow cadence hides it.',
+    rules: ['Closing a sprint asks what happens to unfinished cards: carry over or back to Backlog.', 'Velocity is the count of cards shipped per sprint.'], related: ['analytics', 'board'] },
+  analytics: { when: 'Use it at a retro or when the board feels slow and you want evidence.',
+    rules: ['Flow cadence shows cumulative flow, cycle time, throughput and aging.', 'Sprint cadence shows burndown and velocity.', 'The retro digest is built from the audit log, so it only mentions what was recorded.'], related: ['activity', 'sprints'] },
+  team: { when: 'Use it to bring someone in or change what a role may do. Org admins and product owners only.',
+    rules: ['Claude is listed but locked: it cannot be given sign-off, release or invite rights.', 'Invites stay pending until accepted; you can resend or revoke.', 'Email must be valid before an invite can be sent.'], related: ['agent', 'providers'] },
+  agent: { when: 'Use it to change how Claude behaves on a project without touching code.',
+    rules: ['CLAUDE.md is read at the start of every session; changes apply to the next session.', 'Org-managed hooks are locked and cannot be loosened by a project.', 'Hook actions: allow, ask (pause for a human) or block.'], related: ['drawer', 'providers'] },
+  providers: { when: 'Use it once per org to connect model providers, then pick one per project in settings.',
+    rules: ['Keys are write-only: stored, never shown again.', 'Anthropic can be routed through Bedrock, Vertex or Foundry to keep inference in your cloud account.', 'A provider must be connected before it can be an execution provider.'], related: ['agent', 'team'] },
+};

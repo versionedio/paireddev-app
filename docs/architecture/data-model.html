@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PairedDev Entities</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css?v=3">
+</head>
+<body>
+<main>
+<div class="eyebrow">Data model</div>
+<h1>Entities</h1>
+<p class="lede">27 entities to create with <code>create_entity</code>. Each gets create / get / list / update / delete routes automatically. Records are per tenant; the tenant never appears as a field.</p>
+
+<div class="stat"><div><b>27</b><span>entities to create</span></div><div><b>7</b><span>already in org (platform ACL/user)</span></div><div><b>≤5</b><span>lookup columns per entity</span></div><div><b>2</b><span>fully append-only (audit, transitions)</span></div></div>
+
+<div class="callout"><b>Already in the org:</b> <code>aclpolicy</code>, <code>group</code>, <code>settings</code>, <code>useraclpolicy</code>, <code>usergroup</code>, <code>userrole</code>, <code>userstatus</code>. They are the platform's own. The requirements' <b>Group</b> (a container of projects) is therefore named <code>project_group</code> to avoid colliding with the platform <code>group</code> (a set of users).</div>
+
+<h2 id="erd">1 · Relationships</h2>
+<figure class="fig"><figcaption>Fig 1 · ER diagram (lookup columns only)</figcaption><div class="body">
+<pre class="mermaid">
+erDiagram
+  project ||--o{ project_group_member : "in groups"
+  project_group ||--o{ project_group_member : "contains"
+  project ||--o{ sprint : "plans"
+  project ||--o{ work_item : "holds"
+  project ||--o{ hook : "enforces"
+  project ||--o{ project_skill : "has"
+  project ||--o{ flow_snapshot : "daily"
+  project ||--o{ retro_digest : "summarised"
+  sprint ||--o{ work_item : "commits"
+  delivery ||--o{ work_item : "bundles"
+  delivery ||--o{ preflight_run : "checked by"
+  member ||--o{ work_item : "owns"
+  member ||--o{ work_item_worker : "works"
+  member ||--o{ notification_pref : "prefers"
+  work_item ||--o{ work_item_worker : "has"
+  work_item ||--o{ work_item_vote : "voted"
+  work_item ||--o{ work_item_dependency : "depends"
+  work_item ||--o{ checklist_item : "gated by"
+  work_item ||--o{ activity_entry : "feed"
+  work_item ||--o{ audit_event : "audited"
+  work_item ||--o{ lane_transition : "moved"
+  work_item ||--o{ plan : "planned"
+  work_item ||--o{ agent_session : "runs"
+  plan ||--o{ agent_session : "approved into"
+  agent_session ||--o{ session_step : "streams"
+  agent_session ||--o{ session_gate : "pauses"
+</pre></div></figure>
+
+<h2 id="tables">2 · Entity catalogue</h2>
+<p>Column types use nostackai names: <code>string number boolean date enum lookup formula autoincrement</code>. JSON-shaped values are stored as <code>string</code> and parsed by blocks. “Writes via” says which route may change the table; “direct” means the entity's own REST route is allowed for permitted roles.</p>
+
+<h3>People and access</h3>
+<div class="tw"><table>
+<thead><tr><th>Entity</th><th>Key fields</th><th>Lookups</th><th>Writes via</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>member</code></td><td>user_id, name (display), email, kind <code>human|agent</code>, role <code>requester|dev|owner</code>, status <code>active|away|read_only</code>, github_login, hue, operator_member_id</td><td>—</td><td>invite-member, update-member</td><td>Roster. One row per tenant user <em>and</em> per agent identity. An agent row names its accountable human in <code>operator_member_id</code>. Unique on email.</td></tr>
+<tr><td><code>invite</code></td><td>email, role, status <code>pending|revoked|accepted</code>, invited_by, resend_count</td><td>—</td><td>invite-member, resend-invite, revoke-invite</td><td>Wraps the platform invitation flow so the roster can show “Invited 2 days ago”.</td></tr>
+<tr><td><code>permission_cell</code></td><td>role, permission, allowed, locked</td><td>—</td><td>update-permissions</td><td>The role × permission matrix. Agent sign-off and release cells are <code>locked=true</code>: rejected on write. Display only; the real boundary is ACL (see <a href="integrations.html#acl">Access</a>).</td></tr>
+<tr><td><code>notification_pref</code></td><td>trigger, channel <code>email|slack</code>, enabled</td><td>member_id</td><td>direct (own rows)</td><td>Drives Event destinations.</td></tr>
+</tbody></table></div>
+
+<h3>Structure and planning</h3>
+<div class="tw"><table>
+<thead><tr><th>Entity</th><th>Key fields</th><th>Lookups</th><th>Writes via</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>project</code></td><td>name, code (STU), hue, cadence <code>flow|1w|2w|3w|4w</code>, exec_provider, repo_owner, repo_name, default_branch, branch_pattern, unattended_policy <code>branch_only|open_pr|never_merge</code>, claude_md_path, claude_md_sha, claude_md_synced_at</td><td>—</td><td>update-project-settings</td><td>Fills the “repo binding” hole the requirements call out (open decision 4). Unique on code.</td></tr>
+<tr><td><code>project_group</code></td><td>name</td><td>—</td><td>direct (owner)</td><td>Standing container of projects.</td></tr>
+<tr><td><code>project_group_member</code></td><td>—</td><td>group_id, project_id</td><td>direct (owner)</td><td>Join. Unique on (group, project).</td></tr>
+<tr><td><code>sprint</code></td><td>name, start_date, days, goal, state <code>planned|active|closed</code>, committed_count, close_choice</td><td>project_id</td><td>create-sprint, close-sprint</td><td>Only meaningful when project cadence ≠ flow.</td></tr>
+<tr><td><code>delivery</code></td><td>name, mode <code>gated|rollup</code>, note, state <code>open|released</code></td><td>—</td><td>create-delivery, update-delivery-items</td><td>Items join through <code>work_item.delivery_id</code> (one delivery per item). <a href="gaps.html#g-delivery">G-19</a> asks whether that is right.</td></tr>
+</tbody></table></div>
+
+<h3>Work</h3>
+<div class="tw"><table>
+<thead><tr><th>Entity</th><th>Key fields</th><th>Lookups</th><th>Writes via</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>work_item</code></td><td>name (= title), number <code>autoincrement</code>, project_key (copied from the project by the create block), key <code>formula</code> <code>CONCATENATE(project_key, "-", number)</code>, description, category <code>bug|feature|performance|docs</code>, lane (7 values), bucket <code>backlog|next|later</code>, submitter_email, votes, impact, effort, score, ai_tags, pill_text, pill_kind <code>ai|block|wait|ok|idle|hold</code>, branch, pr_number, pr_url, pr_state, head_sha, ci_build/test/deploy <code>queued|run|pass|fail</code>, blocked, block_reason, acceptance (json), lane_entered_at, closed_at</td><td>project_id, owner_id → member, sprint_id, delivery_id</td><td><b>blocks only</b></td><td>4 of 5 lookups used. Platform ids are generated and cannot be supplied, so “ITR-118” is a formula over an auto-increment number. <a href="gaps.html#g-id">G-11</a> checks it is per tenant.</td></tr>
+<tr><td><code>work_item_worker</code></td><td>state (“coding”, “pairing”)</td><td>item_id, member_id</td><td>set-workers</td><td>Zero or more. Workers may be agents; <code>owner_id</code> may not.</td></tr>
+<tr><td><code>work_item_vote</code></td><td>voter_user_id</td><td>item_id</td><td>vote-request</td><td>Unique on (item, voter) makes double votes impossible. <code>work_item.votes</code> is a maintained count.</td></tr>
+<tr><td><code>work_item_dependency</code></td><td>—</td><td>item_id, depends_on_id</td><td>add/remove-dependency</td><td>Cross-project allowed.</td></tr>
+<tr><td><code>checklist_item</code></td><td>idx 0-3, label, ai_checked, ai_reasoning, signed, signed_by, signed_at</td><td>item_id</td><td>record-precheck (agent), signoff-checklist (human)</td><td>Two different blocks write two different column sets, so an agent can pre-check but never sign.</td></tr>
+<tr><td><code>activity_entry</code></td><td>actor_kind <code>human|agent|system</code>, body, pre (diffstat/hunk)</td><td>item_id, actor_member_id</td><td>send-prompt, apply-repo-event, others</td><td>The “Dev ↔ Claude” feed.</td></tr>
+</tbody></table></div>
+
+<h3>History (append-only)</h3>
+<div class="tw"><table>
+<thead><tr><th>Entity</th><th>Key fields</th><th>Lookups</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>audit_event</code></td><td>actor_kind, actor_id, action, target_key, branch, detail, outcome <code>allowed|denied</code></td><td>item_id</td><td><code>excludeOps: ["update","delete"]</code>. Requirement 10. Denied attempts are logged too.</td></tr>
+<tr><td><code>lane_transition</code></td><td>from_lane, to_lane, actor_kind, actor_id, project_id, sprint_id, at</td><td>item_id</td><td><code>excludeOps: ["update","delete"]</code>. Source of truth for cycle time, throughput, burndown, velocity.</td></tr>
+<tr><td><code>repo_event</code></td><td>delivery_id (X-GitHub-Delivery), event_type, action, branch, pr_number, pr_url, head_sha, check_state, applied</td><td>—</td><td>Webhook landing table. Unique on delivery_id, so a re-delivery is ignored. <code>excludeOps: ["delete"]</code>.</td></tr>
+<tr><td><code>flow_snapshot</code></td><td>day, counts (json per lane)</td><td>project_id</td><td>Written nightly. History cannot be rebuilt later, so the schedule starts at go-live.</td></tr>
+</tbody></table></div>
+
+<h3>Agent work and configuration</h3>
+<div class="tw"><table>
+<thead><tr><th>Entity</th><th>Key fields</th><th>Lookups</th><th>Writes via</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>plan</code></td><td>revision, status <code>awaiting|approved|sent_back|superseded</code>, intro, files (json: path, kind edit/new, size), steps (json), risks (json), notes, provider, decided_by, decided_at</td><td>item_id</td><td>request-plan, approve-plan, revise-plan</td><td>Nothing is written to the repo until a human sets <code>approved</code>. Requirement 2.</td></tr>
+<tr><td><code>agent_session</code></td><td>status <code>queued|running|paused|idle|done|failed</code>, provider, run_handle, work_branch, started_at, ended_at, summary, files_changed, pr_number</td><td>item_id, plan_id</td><td>start-session, sync-session, session-gate-decision</td><td><code>run_handle</code> is what <code>muse-code.get_task</code> needs.</td></tr>
+<tr><td><code>session_step</code></td><td>seq, kind <code>read|write|bash|test|git|deny</code>, text, at</td><td>session_id</td><td>sync-session, apply-repo-event</td><td>Granularity depends on <a href="gaps.html#g-stream">G-01</a>.</td></tr>
+<tr><td><code>session_gate</code></td><td>seq, hook_name, path, reason, decision <code>pending|approved|denied</code>, decided_by</td><td>session_id</td><td>session-gate-decision</td><td>The inline “Approve write / Deny” card.</td></tr>
+<tr><td><code>hook</code></td><td>name, glob, trigger, action <code>block|ask|allow</code>, scope <code>team|tenant_admin</code>, locked</td><td>project_id (null = whole tenant)</td><td>update-hooks</td><td><code>scope=tenant_admin</code> rows can only be changed by a tenant admin; a project owner cannot widen them. Rendered into the repo's <code>.claude/settings.json</code> by a Glyph.</td></tr>
+<tr><td><code>project_skill</code></td><td>name, triggers, body, repo_sha, updated_at</td><td>project_id</td><td>skills blocks</td><td>Index of files in the repo's <code>.claude/skills/</code>; the repo is the source of truth.</td></tr>
+<tr><td><code>preflight_run</code></td><td>scope <code>release|delivery</code>, project_id, status, findings (json: branch, verdict, paths, reasoning), cleared, summary</td><td>delivery_id</td><td>run-release-preflight, run-delivery-preflight</td><td>Findings carry the overlapping paths as evidence.</td></tr>
+<tr><td><code>retro_digest</code></td><td>from_date, to_date, groups (json)</td><td>project_id</td><td>prepare-retro</td><td>Cached so reopening Analytics is instant.</td></tr>
+</tbody></table></div>
+
+<h2 id="indexes">3 · Indexes that matter for scale</h2>
+<div class="tw"><table>
+<thead><tr><th>Entity</th><th>Index</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td><code>work_item</code></td><td>lookup on <code>project_id</code> with <code>lane</code> in the sort key; lookup on <code>owner_id</code>; lookup on <code>sprint_id</code>; lookup on <code>delivery_id</code></td><td>Board per project, my cards, sprint burndown, delivery view without scanning.</td></tr>
+<tr><td><code>work_item</code></td><td>unique on <code>branch</code>; <code>indexFields</code> on <code>pr_url</code></td><td>Webhook correlation must be exact (one branch ↔ one card).</td></tr>
+<tr><td><code>work_item_vote</code></td><td>unique (<code>item_id</code>, <code>voter_user_id</code>)</td><td>One vote per person.</td></tr>
+<tr><td><code>checklist_item, activity_entry, plan, agent_session, session_step</code></td><td>lookup on <code>item_id</code> / <code>session_id</code></td><td>Drawer loads one card in one call per tab.</td></tr>
+<tr><td><code>lane_transition</code></td><td>lookup on <code>item_id</code>; audit-style index on created time</td><td>Metrics read by time range.</td></tr>
+<tr><td><code>repo_event</code></td><td>unique on <code>delivery_id</code></td><td>Idempotent webhooks.</td></tr>
+</tbody></table></div>
+<div class="callout warn"><b>Scan limit.</b> A list can stop after about 2,000 scanned records. The Backlog screen filters on several non-indexed columns (tags, vote floor, date, text). That works on a tenant with hundreds of items but not thousands. <a href="gaps.html#g-list">G-06</a> proposes the fix.</div>
+
+<h2 id="ownership">4 · Governed tables</h2>
+<p>For these, every role's direct create / update / delete is denied in ACL. Only Logic Blocks write them.</p>
+<p><span class="chip c-bad">work_item</span><span class="chip c-bad">checklist_item</span><span class="chip c-bad">plan</span><span class="chip c-bad">agent_session</span><span class="chip c-bad">session_step</span><span class="chip c-bad">session_gate</span><span class="chip c-bad">hook</span><span class="chip c-bad">permission_cell</span><span class="chip c-bad">audit_event</span><span class="chip c-bad">lane_transition</span><span class="chip c-bad">repo_event</span></p>
+<p>Reads are open to the roles that need them. The remaining tables (<code>project_group</code>, <code>notification_pref</code>, …) are plain CRUD for permitted roles.</p>
+</main>
+<script src="assets/docs.js?v=3"></script>
+</body>
+</html>

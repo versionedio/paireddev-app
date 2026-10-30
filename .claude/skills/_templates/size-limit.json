@@ -1,0 +1,4 @@
+[
+  { "name": "First-load JS: app shell", "path": "out/_next/static/chunks/*.js", "limit": "170 kB", "gzip": true },
+  { "name": "Theme CSS", "path": "out/_next/static/css/*.css", "limit": "40 kB", "gzip": true }
+]

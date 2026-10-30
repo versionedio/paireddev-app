@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PairedDev Integrations and Access</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css?v=3">
+</head>
+<body>
+<main>
+<div class="eyebrow">Connectors · AI providers · Access · Flags</div>
+<h1>Everything outside the tables</h1>
+<p class="lede">What to adopt, what each tenant must supply in the console, who may call what, and which features sit behind which flag.</p>
+
+<div class="callout bad"><b>Current state of the org.</b> <code>list_connectors</code> returns <code>[]</code>; <code>describe_connector</code> for <code>github</code>, <code>claude-code</code> and <code>aws</code> answers “not enabled for this org”. All three show <code>enabled: true</code> in the platform catalogue, so nothing blocks adoption. It just has not been done. Tenant <code>2vrdf</code> has no AI provider and no connector credentials (<code>get_tenant_readiness</code>).</div>
+
+<h2 id="connectors">1 · Connectors to adopt</h2>
+<figure class="fig"><figcaption>Fig 1 · Who uses which credential</figcaption><div class="body">
+<pre class="mermaid">
+flowchart LR
+  classDef human fill:#3b5b9a,stroke:#7da2e8,color:#fff
+  classDef sys fill:#4a5166,stroke:#8b93a7,color:#fff
+  classDef ext fill:#1f6f78,stroke:#59c2cc,color:#fff
+  classDef ai fill:#9a6a1f,stroke:#e0a850,color:#fff
+  U["Signed-in dev or owner"]:::human -->|"personal token<br/>saved at updateprofile"| GP["github (personal)"]:::ext
+  U -->|"start_task as that person"| CC["muse-code:main"]:::ext
+  AUTO["Events, schedules, crews,<br/>review bot"]:::sys -->|"shared service-account token"| GA["github:automation (shared)"]:::ext
+  WH["GitHub webhook"]:::ext -->|"HMAC secret"| GA
+  GP --> REPO[("Repository")]:::ext
+  GA --> REPO
+  CC -->|"workflow_dispatch"| REPO
+  REPO -->|"runner uses provider key stored as repo secret"| AIP["Anthropic"]:::ai
+  EVT["Events"]:::sys --> SL["slack:notify"]:::ext
+  EVT --> EM["email"]:::ext
+  FEU["Attachments"]:::sys --> S3["s3 (or managed storage)"]:::ext
+  OPS["Hosting stack"]:::sys --> AWS["aws (CloudFormation)"]:::ext
+</pre></div></figure>
+
+<div class="tw"><table>
+<thead><tr><th>Instance key</th><th>Type</th><th>Method</th><th>Used for</th><th>Tenant supplies (console)</th></tr></thead>
+<tbody>
+<tr><td><code>github</code></td><td>devtools</td><td>Personal token, one per person</td><td>Work-tab buttons: branch, compare, commit, PR, request review, checks, merge, issue. CLAUDE.md and skill commits.</td><td>Owner (org/user), allowed repo. Each person saves a fine-grained PAT (Contents, Pull requests, Issues, Actions RW; Checks, Metadata R) in their profile.</td></tr>
+<tr><td><code>github:automation</code></td><td>devtools</td><td>Shared token, service account</td><td>Webhook receiver, schedules, crew reads, bot review comments. No person is signed in for these.</td><td>Owner, allowed repo, token, <b>webhook secret</b> (same value entered in the repo's Webhooks settings).</td></tr>
+<tr><td><code>muse-code:main</code></td><td>coding_agent</td><td>Personal (or shared)</td><td><code>start_task</code>, <code>get_task</code>, plus one-time <code>setup_workflow</code>, <code>setup_permissions</code>, <code>setup_secret</code>.</td><td>Owner, <code>ai_provider</code> = anthropic, <code>ai_model</code>, repo admin token for setup only.</td></tr>
+<tr><td><code>slack:notify</code></td><td>notification</td><td>Bearer</td><td>Escalations, plan-ready, session-paused.</td><td>Bot token; channel in General settings.</td></tr>
+<tr><td><code>email</code></td><td>notification</td><td>None</td><td>Invites, notification matrix.</td><td>Nothing (org verified identity; custom from-address is paid).</td></tr>
+<tr><td><code>s3</code></td><td>storage</td><td>—</td><td>Portal screenshot upload via <code>presign_upload</code>.</td><td>Optional. Without AWS keys it falls back to nostackai managed storage.</td></tr>
+<tr><td><code>aws</code></td><td>cloud</td><td>Dynamic</td><td>Create/update the CloudFormation stack that hosts the static front-end (S3 + CloudFront, certificate and hosted-zone lookups). Optional later: <code>describe_stacks</code> for the Pipeline view.</td><td>Role/method and region. CloudFront certificates need us-east-1.</td></tr>
+</tbody></table></div>
+<p>Adopting a non-payment connector always needs a <code>name</code>; the response's <code>instance_key</code> (for example <code>github:automation</code>) is what every later call uses. Each named instance has its own credentials.</p>
+
+<h3>GitHub webhook landing</h3>
+<p>Set once per org with <code>set_connector_webhook_landing</code>. Every event is an <b>insert</b> into <code>repo_event</code>; no correlation key, so each delivery is its own row.</p>
+<div class="tw"><table>
+<thead><tr><th>GitHub event</th><th>Fields mapped into <code>repo_event</code></th></tr></thead>
+<tbody>
+<tr><td><code>pull_request.opened</code> / <code>closed</code></td><td>delivery_id, event_type, action, branch (<code>pull_request.head.ref</code>), pr_number, pr_url, head_sha, merged</td></tr>
+<tr><td><code>pull_request_review.submitted</code></td><td>delivery_id, branch, pr_number, review state, reviewer login</td></tr>
+<tr><td><code>check_suite.completed</code></td><td>delivery_id, branch, head_sha, conclusion</td></tr>
+<tr><td><code>workflow_run.completed</code></td><td>delivery_id, branch, head_sha, conclusion, workflow name (build / test / deploy for the CI strip)</td></tr>
+<tr><td><code>push</code></td><td>delivery_id, branch, head_sha, commits-behind where available</td></tr>
+</tbody></table></div>
+<div class="callout"><b>Open decisions in the requirements, resolved by what the connector offers.</b> (2) Multi-file commits: the connector has <code>create_blob</code>, <code>create_tree</code>, <code>create_commit</code> and <code>update_ref</code>, so atomic commits are available. (1) Correlation: branch name, made unique by the pattern <code>pd/&lt;item key&gt;-&lt;slug&gt;</code> and enforced by a unique index on <code>work_item.branch</code>. (3) Webhook secret: already a declared connector credential. (4) Repo binding: fields on <code>project</code>. GitHub App auth is still not supported; personal and shared PATs are.</div>
+
+<h3>Platform rules from the requirements and where they land</h3>
+<div class="tw"><table>
+<thead><tr><th>Rule</th><th>Enforced by</th></tr></thead>
+<tbody>
+<tr><td>Merge never unattended by an agent; human approval required</td><td><code>pd_dev_merge_pr</code> is in no agent policy; block re-checks <code>kind == human</code>; uses the caller's own token</td></tr>
+<tr><td>Agent review is <code>COMMENT</code> only</td><td>Block forces the event type; the agent route cannot choose it; the bot uses <code>github:automation</code></td></tr>
+<tr><td>Commits subject to hooks; <code>ask</code> pauses the session</td><td><code>pd_dev_git_op</code> checks <code>hook</code> rows for commits made through the board. Commits made on the runner depend on the repo's own <code>.claude/settings.json</code> (<a href="gaps.html#g-hooks">G-13</a>)</td></tr>
+<tr><td>Merge sends expected head SHA</td><td>Block passes <code>work_item.head_sha</code>. <b>Verify after adoption</b> that <code>merge_pull_request</code> accepts a sha field (<code>describe_connector</code>)</td></tr>
+<tr><td>Branch name unique per card</td><td>Pattern + unique index</td></tr>
+</tbody></table></div>
+
+<h2 id="ai">2 · AI providers</h2>
+<p>The org catalogue already lists 15 providers including <code>anthropic</code> and <code>gemini</code>; no org-level action is needed to use them. Each <b>tenant</b> enables a provider, pastes its own key and picks a default model in Tenant Settings → AI. No MCP call can set a key.</p>
+<div class="tw"><table>
+<thead><tr><th>Provider</th><th>Used by</th><th>Requirement</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td><code>anthropic</code></td><td>Planner, reviewer, pre-flight crews; default for triage. The coding runner uses whichever provider the tenant picks on the coding-agent connector.</td><td>7 · Anthropic execution</td><td>In catalogue. Tenant key needed.</td></tr>
+<tr><td><code>gemini</code></td><td>Triage, scoring, summaries (retro). Not used for write sessions</td><td>7 · Google, not certified for protected paths</td><td>In catalogue. Tenant key needed.</td></tr>
+<tr><td>Bedrock / Vertex / Foundry routing of Anthropic</td><td>Optional per project</td><td>7, 13</td><td><b>Not offered</b> as a gateway option. See <a href="gaps.html#g-byo">G-05</a>.</td></tr>
+<tr><td><code>openai</code></td><td>—</td><td>13 says OpenAI “cannot be brokered”</td><td>The catalogue <i>does</i> include OpenAI (text, image, speech) and a <code>codex</code> coding-agent connector exists. The requirement text is out of date.</td></tr>
+</tbody></table></div>
+<p>Model choice order: the model named in the call → the connection's saved setting → the workspace default. A model is never silently swapped. A crew agent can name a provider; a missing one fails with <code>provider_not_configured</code>. The project's <code>exec_provider</code> field is passed as <code>provider</code> on crew agents and ai_call steps.</p>
+
+<h2 id="acl">3 · Access</h2>
+<div class="callout warn"><b>What ACL can and cannot do here.</b> It sees the route name and nothing in the body, and a user's whole policy is capped near 8 KB. So the design is: no direct write access to governed tables for anyone, role access expressed as <b>prefix grants on Logic Block names</b>, and sensitive rules repeated inside the block. <code>userrole</code> is only a label in the token; it grants nothing.</div>
+<div class="tw"><table>
+<thead><tr><th>Policy</th><th>Allow</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>pd-requester</code></td><td>blocks <code>pd_req_*</code>; evaluate flags; read own <code>member</code></td><td><b>Default for new users</b> via <code>set_default_member_access</code>. Least privilege: a stranger who signs up can submit and vote, nothing else.</td></tr>
+<tr><td><code>pd-dev</code></td><td>requester + <code>pd_dev_*</code>; <code>list*</code>/<code>get*</code>/<code>count*</code> on non-sensitive entities; create/update on <code>notification_pref</code></td><td>Can own cards, run agents, sign off review items.</td></tr>
+<tr><td><code>pd-owner</code></td><td>dev + <code>pd_own_*</code>; CRUD on <code>project_group</code>, <code>project_group_member</code></td><td>Prioritise, advance, promote, sprints, deliveries, invites.</td></tr>
+<tr><td><code>pd-admin</code></td><td>owner + <code>pd_adm_*</code></td><td>Permission matrix, tenant-admin hooks, bootstrap.</td></tr>
+<tr><td><code>pd-agent</code></td><td><code>pd_agt_*</code> + <code>pd_dev_get_*</code>, <code>pd_dev_list_*</code></td><td>Never <code>signoff</code>, <code>advance</code>, <code>merge</code>, <code>promote</code>, <code>set_owner</code>. Assigned to the agent's service identity only.</td></tr>
+</tbody></table></div>
+<p>The platform's built-in <code>adminacl</code> is <code>*</code> on <code>*</code>. A tenant admin who holds it can write governed tables directly. That is an accepted trust boundary for admins but must not be given to an agent identity. See <a href="gaps.html#g-admin">G-16</a>.</p>
+<p>Agents appear in the roster as a <code>member</code> with <code>kind = agent</code> and an <code>operator_member_id</code>. Actions the agent takes through the GitHub runner reach the board via webhooks and <code>pd_sys_*</code> blocks, so the agent does not need a board token for the normal path. A token for Muse Code to drive the board directly (requirement: MCP parity) is covered in <a href="gaps.html#g-mcp">G-18</a>.</p>
+
+<h2 id="flags">4 · Feature flags</h2>
+<p>Defined once at org level with <code>create_feature_flag</code> (dev tier; reach prod via deploy). Keys are permanent, lowercase, and every tenant has every flag. The front-end evaluates once at start-up; blocks read <code>{{params.flags.KEY}}</code> and treat a missing value as off.</p>
+<div class="tw"><table>
+<thead><tr><th>Key</th><th>Default</th><th>Tenant may override</th><th>Gates</th></tr></thead>
+<tbody>
+<tr><td><code>portal</code></td><td>on</td><td>yes</td><td>Requester portal</td></tr>
+<tr><td><code>bulk-actions</code></td><td>off</td><td>yes</td><td>Backlog bulk toolbar</td></tr>
+<tr><td><code>deliveries</code></td><td>off</td><td>yes</td><td>Deliveries screen and chips</td></tr>
+<tr><td><code>cross-project-preflight</code></td><td>off</td><td>yes</td><td>Gated delivery pre-flight</td></tr>
+<tr><td><code>sprints</code></td><td>off</td><td>yes</td><td>Sprint cadence options, Sprints tab</td></tr>
+<tr><td><code>retro-digest</code></td><td>off</td><td>yes</td><td>Prepare retro</td></tr>
+<tr><td><code>plan-preview</code></td><td>off</td><td>yes</td><td>Plan Preview panel and <code>request_plan</code></td></tr>
+<tr><td><code>live-session</code></td><td>off</td><td>yes</td><td>Session panel (depends on <a href="gaps.html#g-stream">G-01</a>)</td></tr>
+<tr><td><code>agent-config</code></td><td>off</td><td>yes</td><td>CLAUDE.md, Skills, Hooks screens</td></tr>
+<tr><td><code>providers-tab</code></td><td>off</td><td>yes</td><td>AI provider cards</td></tr>
+<tr><td><code>show-ai-score</code></td><td>on</td><td>yes</td><td>Score pill on cards</td></tr>
+<tr><td><code>seed-demo</code></td><td>off</td><td>no</td><td><code>pd_seed_demo</code> (dev only)</td></tr>
+</tbody></table></div>
+<div class="callout warn"><b>Not a flag:</b> the sign-off gate. The prototype's <code>requireHumanSignoff</code> UI flag is for demos. In production it must not be switchable. The gate is always on in <code>pd_own_advance_item</code>. If a demo bypass is wanted, make it a flag with <code>overridable: false</code> and default on.</div>
+
+<h2 id="settings">5 · What each tenant must set up</h2>
+<p>None of this can be done through MCP. After the build, <code>get_tenant_readiness</code> lists what is missing per tenant; this is the checklist to hand to the tenant admin.</p>
+<div class="tw"><table>
+<thead><tr><th>Where</th><th>Item</th><th>Who</th></tr></thead>
+<tbody>
+<tr><td>Tenant Settings → AI</td><td>Enable <code>anthropic</code> (key + default model); optionally <code>gemini</code></td><td>Tenant admin</td></tr>
+<tr><td>Tenant Settings → Connectors</td><td><code>github:automation</code>: owner, allowed repo, shared token, webhook secret. <code>muse-code:main</code>: owner, provider, model. <code>slack:notify</code>: bot token.</td><td>Tenant admin</td></tr>
+<tr><td>Own profile in PairedDev</td><td>Personal GitHub token (and optional committer name/email)</td><td>Each dev / owner</td></tr>
+<tr><td>GitHub repo → Settings → Webhooks</td><td>URL from <code>get_connector_webhook_info</code>, content type JSON, same secret, events: pull_request, pull_request_review, check_suite, workflow_run, push</td><td>Repo admin</td></tr>
+<tr><td>Once per repo</td><td>Run <code>muse-code</code> <code>setup_workflow</code>, <code>setup_permissions</code>, <code>setup_secret</code> (needs a token with repo admin; 409 means the GitHub org blocks Actions from creating PRs)</td><td>Repo admin, via a setup block</td></tr>
+<tr><td>Tenant Settings → General</td><td><code>slack_channel</code>, <code>branch_pattern</code> default</td><td>Tenant admin</td></tr>
+</tbody></table></div>
+
+<h2 id="frontend">6 · What the front-end needs from the org</h2>
+<div class="tw"><table>
+<thead><tr><th>Item</th><th>Value / status</th></tr></thead>
+<tbody>
+<tr><td>Base URL</td><td><code>https://dd1use2.nostackai.com/app/paired-egih</code> (from <code>get_org_info</code>)</td></tr>
+<tr><td>Headers</td><td><code>client_id</code>, <code>x-api-key</code> (console → Org Settings → API Keys), <code>Authorization</code> = signed-in user token</td></tr>
+<tr><td>Allowed Domains (CORS)</td><td><b>Empty today.</b> The deployed front-end domain must be added with <code>set_allowed_domains</code> (localhost is always allowed). Outbound allowed domains are also empty, which blocks webhook steps and <code>ctx.http</code>; none of the planned assets use them.</td></tr>
+<tr><td>App URL</td><td><b>Empty today.</b> Needed so invite and password emails link back. <code>set_app_url</code>.</td></tr>
+<tr><td>WebSocket</td><td><code>wss://&lt;app WebSocket endpoint&gt;?token=&lt;user token&gt;</code>. The endpoint is not in <code>get_org_info</code>; read it from the console or the API reference.</td></tr>
+<tr><td>Flags</td><td><code>POST /flags/evaluate</code> at start-up, default off on failure</td></tr>
+</tbody></table></div>
+</main>
+<script src="assets/docs.js?v=3"></script>
+</body>
+</html>

@@ -1,0 +1,195 @@
+// Reference documentation for each page. Data only: screens/docs.js renders it.
+// actors[].kind: human | agent | system.  cases[].by = indexes into actors.
+// flow[].kind: start | step | decision | end; decisions carry yes/no outcomes; step.who tags the actor.
+const A = {
+  req: { name: 'Requester', kind: 'human' }, owner: { name: 'Product owner', kind: 'human' }, dev: { name: 'Developer', kind: 'human' },
+  claude: { name: 'Claude', kind: 'agent' }, sys: { name: 'nostackai', kind: 'system' }, admin: { name: 'Org admin', kind: 'human' },
+};
+const pick = (...k) => k.map(x => A[x]);
+
+export const PAGE_DOCS = {
+  portal: {
+    title: 'Public feedback portal',
+    objective: 'Give requesters one place to submit ideas and bugs, vote on what matters, and see status without asking anyone. Votes feed the priority score used everywhere else.',
+    actors: pick('req', 'owner', 'sys'),
+    cases: [
+      { text: 'Submit a new request', by: [0] }, { text: 'Vote or remove a vote on a request', by: [0] },
+      { text: 'Sort by votes, newest or my submissions', by: [0, 1] }, { text: 'Filter by status (under review to shipped)', by: [0, 1] },
+      { text: 'See request status change as work moves lanes', by: [0, 2] }, { text: 'Scope the list to a group or project', by: [1] },
+    ],
+    flow: [
+      { kind: 'start', text: 'Requester opens the portal' }, { kind: 'step', who: 'Requester', text: 'Browses, sorts and filters requests' },
+      { kind: 'decision', text: 'Already requested?', yes: 'Vote on it', no: 'Submit a new request' },
+      { kind: 'step', who: 'Requester', text: 'Fills title (6+ characters), description, category, optional screenshot' },
+      { kind: 'step', who: 'nostackai', text: 'Creates the item in Backlog with 1 vote and no AI labels' },
+      { kind: 'step', who: 'Product owner', text: 'Sees it in Triage and Backlog' }, { kind: 'end', text: 'Status updates here as the card moves' },
+    ],
+    endpoints: ['GET /v1/requests?sort=&status=', 'POST /v1/requests', 'POST /v1/requests/:id/vote'],
+  },
+  backlog: {
+    title: 'Backlog',
+    objective: 'The full, searchable list of everything not yet committed. Built for hundreds of items: filter, sort, select many and act on them together, then open any row in the shared card drawer.',
+    actors: pick('owner', 'dev', 'claude'),
+    cases: [
+      { text: 'Search titles and ids', by: [0, 1] }, { text: 'Filter by project, bucket, tag, votes and age', by: [0, 1] },
+      { text: 'Sort by votes, AI score, newest or A to Z', by: [0, 1] }, { text: 'Select rows and bulk tag, move or add to a delivery', by: [0] },
+      { text: 'Send selected items to a triage pass', by: [0, 2] }, { text: 'Open a row in the card drawer', by: [0, 1] },
+    ],
+    flow: [
+      { kind: 'start', text: 'Owner opens Backlog' }, { kind: 'step', who: 'Product owner', text: 'Narrows the list with search and filters' },
+      { kind: 'step', who: 'nostackai', text: 'Recomputes the count and pages (50 per page)' },
+      { kind: 'decision', text: 'Act on many items?', yes: 'Tick rows, pick a bulk action', no: 'Click a row to open the drawer' },
+      { kind: 'step', who: 'nostackai', text: 'Applies the action to every selected item' },
+      { kind: 'end', text: 'Confirmation line reports what changed' },
+    ],
+    endpoints: ['GET /v1/items?scope=&q=&project=&tag=&bucket=&minVotes=&since=&sort=&page=', 'POST /v1/items/bulk  {ids, action, value}'],
+  },
+  triage: {
+    title: 'Triage',
+    objective: 'A short ritual over the intake queue. Claude estimates impact and review effort and labels each item; the owner decides what goes in Next, Later or stays in Backlog.',
+    actors: pick('owner', 'claude', 'sys'),
+    cases: [
+      { text: 'Ask Claude to score and label unlabelled items', by: [0, 1] }, { text: 'Read the score breakdown for an item', by: [0] },
+      { text: 'Drag an item between Backlog, Next and Later', by: [0] }, { text: 'Compute the composite priority score', by: [2] },
+    ],
+    flow: [
+      { kind: 'start', text: 'Owner opens Triage' }, { kind: 'decision', text: 'Items without AI labels?', yes: 'Ask Claude to triage', no: 'Review the columns' },
+      { kind: 'step', who: 'Claude', text: 'Writes tags, impact (1-10) and review effort (1-10)' },
+      { kind: 'step', who: 'nostackai', text: 'Score = votes (45) + impact (32) + inverted effort (16)' },
+      { kind: 'step', who: 'Product owner', text: 'Hovers a score for the breakdown and drags cards to slot them' }, { kind: 'end', text: 'Bucket saved on the item' },
+    ],
+    endpoints: ['POST /v1/triage/run', 'PATCH /v1/items/:id  {bucket}'],
+  },
+  board: {
+    title: 'Iteration board',
+    objective: 'The working board. Every card sits in one of seven lanes, has one human owner and any number of workers (people or Claude), and shows live status so blocked work is visible at a glance.',
+    actors: pick('owner', 'dev', 'claude', 'sys'),
+    cases: [
+      { text: 'See what is in flight and who owns it', by: [0, 1] }, { text: 'Move a card between lanes (drag or menu)', by: [0, 1] },
+      { text: 'Open a card to work it', by: [0, 1, 2] }, { text: 'Post live status (coding, blocked, awaiting sign-off)', by: [2, 3] },
+      { text: 'Flag a merge conflict for a human', by: [2] },
+    ],
+    flow: [
+      { kind: 'start', text: 'Card enters Backlog' }, { kind: 'step', who: 'Product owner', text: 'Assigns an owner and moves it to Assigned' },
+      { kind: 'step', who: 'Developer / Claude', text: 'Work starts, card moves to In Progress' },
+      { kind: 'decision', text: 'Conflict or blocker?', yes: 'Claude escalates; card shows a red banner', no: 'Continue to Code Review' },
+      { kind: 'step', who: 'Product owner', text: 'Signs off the review checklist and advances the card' },
+      { kind: 'step', who: 'nostackai', text: 'Integration Testing, then Staged, then Done' }, { kind: 'end', text: 'Deployed' },
+    ],
+    endpoints: ['GET /v1/items?scope=', 'PATCH /v1/items/:id  {lane, pill}', 'POST /v1/items/:id/advance'],
+  },
+  drawer: {
+    title: 'Card drawer',
+    objective: 'One card, four tabs. Detail explains the work, Work runs it (plan, then supervised session), Activity is the dev and Claude conversation, Review is where a human signs off before the card can advance.',
+    actors: pick('owner', 'dev', 'claude', 'sys'),
+    cases: [
+      { text: 'Read description, criteria and dependencies', by: [0, 1] }, { text: 'Start work and approve or revise Claude\'s plan', by: [0, 1] },
+      { text: 'Watch a live session and approve or deny a gated write', by: [0, 1] }, { text: 'Send Claude a prompt, resolve an escalation', by: [0, 1, 2] },
+      { text: 'Pre-check the review checklist with reasoning', by: [2] }, { text: 'Sign off each item and advance the card', by: [0, 1] },
+      { text: 'Block agents from signing off or advancing', by: [3] },
+    ],
+    flow: [
+      { kind: 'start', text: 'Start work' }, { kind: 'step', who: 'Claude', text: 'Posts a plan: files, order of work, risks. Nothing is written' },
+      { kind: 'decision', text: 'Plan acceptable?', yes: 'Approve plan', no: 'Send back with notes (a note is required)' },
+      { kind: 'step', who: 'Claude', text: 'Live session streams steps; a hook set to ask pauses it' },
+      { kind: 'decision', text: 'Approve the paused write?', yes: 'Session resumes', no: 'Session idles; give an instruction and resume' },
+      { kind: 'step', who: 'Claude', text: 'Opens the PR and pre-checks the review checklist' },
+      { kind: 'step', who: 'Developer', text: 'Signs off all four items; the gate clears' }, { kind: 'end', text: 'Advance to the next lane (audited)' },
+    ],
+    endpoints: ['POST /v1/items/:id/plan', 'POST /v1/items/:id/plan/:n/approve | revise', 'GET /v1/items/:id/session (SSE)', 'POST /v1/items/:id/session/gate/:n', 'POST /v1/items/:id/checklist/:n/signoff', 'POST /v1/items/:id/advance'],
+  },
+  deliveries: {
+    title: 'Deliveries',
+    objective: 'A delivery is a release-scoped set of items that can come from any project. Gated deliveries ship together behind one combined gate; Rollup deliveries are a visibility view only. Groups stay separate: they are standing containers of projects.',
+    actors: pick('owner', 'claude', 'dev'),
+    cases: [
+      { text: 'Create a delivery from items across projects', by: [0] }, { text: 'Choose Gated or Rollup mode', by: [0] },
+      { text: 'View a Rollup grouped by project', by: [0, 2] }, { text: 'Run a cross-project pre-flight on a Gated delivery', by: [0, 1] },
+      { text: 'Read why two projects conflict', by: [0, 2] }, { text: 'Release the delivery once the gate clears', by: [0] },
+    ],
+    flow: [
+      { kind: 'start', text: 'Owner creates a delivery' }, { kind: 'decision', text: 'Must ship together?', yes: 'Gated', no: 'Rollup' },
+      { kind: 'step', who: 'Product owner', text: 'Rollup: reads one column per project, no combined gate' },
+      { kind: 'step', who: 'Claude', text: 'Gated: pre-flight reasons across project boundaries' },
+      { kind: 'decision', text: 'Cross-project overlap?', yes: 'Gate locked; human decides order', no: 'Gate cleared' },
+      { kind: 'end', text: 'Release all items together' },
+    ],
+    endpoints: ['GET /v1/deliveries', 'POST /v1/deliveries', 'PATCH /v1/deliveries/:id/items', 'POST /v1/deliveries/:id/preflight'],
+  },
+  releases: {
+    title: 'Releases',
+    objective: 'See what is queued at each gate (Integration, Staging, Production) and whether CI is green. Before promoting staged work, Claude checks the branches against each other and a human decides the order.',
+    actors: pick('owner', 'claude', 'sys'),
+    cases: [
+      { text: 'See items per environment with build, test and deploy status', by: [0, 2] }, { text: 'Run a release pre-flight on staged branches', by: [0, 1] },
+      { text: 'Read overlapping paths and Claude\'s reasoning', by: [0] }, { text: 'Promote staged items to production', by: [0] },
+      { text: 'Promote integration items automatically when tests pass', by: [2] },
+    ],
+    flow: [
+      { kind: 'start', text: 'Cards reach Integration Testing' }, { kind: 'step', who: 'nostackai', text: 'Tests green: auto-promote to Staging' },
+      { kind: 'step', who: 'Claude', text: 'Pre-flight compares the staged branches for shared files' },
+      { kind: 'decision', text: 'Overlap found?', yes: 'Gate locked; Claude proposes an order and stops', no: 'Gate cleared' },
+      { kind: 'step', who: 'Product owner', text: 'Resolves order, then approves' }, { kind: 'end', text: 'Promote to Production' },
+    ],
+    endpoints: ['GET /v1/deployments', 'POST /v1/releases/preflight'],
+  },
+  activity: {
+    title: 'Activity',
+    objective: 'The audit log. Every state change by a person, Claude or the system is recorded and attributed, so you can see who did what and when. It is append-only.',
+    actors: pick('owner', 'dev', 'claude', 'sys'),
+    cases: [
+      { text: 'Read every action in time order', by: [0, 1] }, { text: 'Filter to Claude only or humans only', by: [0] },
+      { text: 'Check what an agent did on a card', by: [0] }, { text: 'Record each transition automatically', by: [3] },
+    ],
+    flow: [
+      { kind: 'start', text: 'Anyone acts on a card' }, { kind: 'step', who: 'nostackai', text: 'Writes an audit event with actor, target, branch and detail' },
+      { kind: 'step', who: 'Product owner', text: 'Opens Activity and filters by actor' }, { kind: 'end', text: 'Reviews or exports the trail' },
+    ],
+    endpoints: ['GET /v1/audit?actor='],
+  },
+  sprints: {
+    title: 'Sprints',
+    objective: 'Only exists when cadence is a sprint length. Commit a block of work, watch it burn down, and close it honestly: unfinished cards either carry over or go back to the backlog.',
+    actors: pick('owner', 'dev'),
+    cases: [{ text: 'Create a sprint with a goal', by: [0] }, { text: 'See progress and projected finish', by: [0, 1] }, { text: 'Close the sprint and choose what happens to open cards', by: [0] }, { text: 'Compare past sprints by velocity', by: [0, 1] }],
+    flow: [{ kind: 'start', text: 'Create sprint' }, { kind: 'step', who: 'Product owner', text: 'Names it, sets start, length and goal' }, { kind: 'step', who: 'nostackai', text: 'Tracks shipped, in flight, blocked' },
+      { kind: 'decision', text: 'Items unfinished at close?', yes: 'Carry over or send to Backlog', no: 'Close' }, { kind: 'end', text: 'Sprint archived with velocity' }],
+    endpoints: ['GET /v1/sprints', 'POST /v1/sprints', 'POST /v1/sprints/:id/close'],
+  },
+  analytics: {
+    title: 'Analytics',
+    objective: 'Answers "is this working?". Flow cadence shows cumulative flow, cycle time, throughput and aging work. Sprint cadence shows burndown and velocity. A retro digest from Claude groups what went wrong.',
+    actors: pick('owner', 'claude'),
+    cases: [{ text: 'Pick a date range (7 to 90 days)', by: [0] }, { text: 'Read flow or sprint charts', by: [0] }, { text: 'Find forgotten cards in Aging work', by: [0] }, { text: 'Prepare a retro digest from the audit log', by: [0, 1] }],
+    flow: [{ kind: 'start', text: 'Owner opens Analytics' }, { kind: 'step', who: 'Product owner', text: 'Chooses a range' }, { kind: 'step', who: 'nostackai', text: 'Recomputes every metric from the raw series' },
+      { kind: 'step', who: 'Claude', text: 'Prepare retro: groups escalations, overrides, rejected sign-offs, outliers' }, { kind: 'end', text: 'Owner picks improvements' }],
+    endpoints: ['GET /v1/metrics/flow | cycle-time | throughput | aging | burndown | velocity', 'POST /v1/retro/digest'],
+  },
+  team: {
+    title: 'Team & access',
+    objective: 'Who can touch the board and what each role may do. Claude appears in the roster like anyone else but can never be granted sign-off or release rights; an accountable human sits behind it.',
+    actors: pick('admin', 'owner'),
+    cases: [{ text: 'Invite a member with a role', by: [0, 1] }, { text: 'Resend or revoke an invite', by: [0, 1] }, { text: 'Set role permissions (agent cells are locked)', by: [0] }, { text: 'Choose notification channels per trigger', by: [0, 1] }],
+    flow: [{ kind: 'start', text: 'Admin opens Team' }, { kind: 'step', who: 'Org admin', text: 'Enters an email and role' }, { kind: 'step', who: 'nostackai', text: 'Creates a pending invite' },
+      { kind: 'decision', text: 'Invite accepted?', yes: 'Member becomes active', no: 'Resend or revoke' }, { kind: 'end', text: 'Permissions apply' }],
+    endpoints: ['GET /v1/members', 'POST /v1/invites', 'GET|PATCH /v1/permissions', 'GET|PATCH /v1/notification-preferences'],
+  },
+  agent: {
+    title: 'Agent configuration',
+    objective: 'What Claude knows before it starts: the repo\'s CLAUDE.md, reusable skills, and hooks that block or pause risky actions. Org-managed hooks cannot be widened by a project.',
+    actors: pick('owner', 'claude', 'admin'),
+    cases: [{ text: 'Edit and commit CLAUDE.md', by: [0] }, { text: 'Add a skill', by: [0] }, { text: 'Review hooks and their actions', by: [0, 2] }, { text: 'Read CLAUDE.md as the first turn of every session', by: [1] }],
+    flow: [{ kind: 'start', text: 'Owner edits CLAUDE.md' }, { kind: 'step', who: 'Product owner', text: 'Commits to the default branch' }, { kind: 'step', who: 'Claude', text: 'Reads it at the start of every session' },
+      { kind: 'decision', text: 'Hook action = ask?', yes: 'Live session pauses for a human', no: 'Allow or block applies' }, { kind: 'end', text: 'Behaviour follows the config' }],
+    endpoints: ['GET|PUT /v1/projects/:id/claude-md', 'GET|POST|PUT|DELETE /v1/projects/:id/skills', 'GET /v1/projects/:id/hooks'],
+  },
+  providers: {
+    title: 'AI providers',
+    objective: 'Org-level connections to the model providers that run plans and sessions. Keys are write-only. Anthropic can be routed through Bedrock, Vertex or Foundry so inference stays in your cloud account.',
+    actors: pick('admin', 'owner'),
+    cases: [{ text: 'Connect a provider with an API key', by: [0] }, { text: 'Route Anthropic through a cloud gateway', by: [0] }, { text: 'Pick the execution provider per project', by: [1] }],
+    flow: [{ kind: 'start', text: 'Admin opens Providers' }, { kind: 'step', who: 'Org admin', text: 'Enters a key (stored in the org secret store, never shown again)' },
+      { kind: 'decision', text: 'Anthropic via a gateway?', yes: 'Choose gateway and endpoint', no: 'Direct' }, { kind: 'step', who: 'Product owner', text: 'Selects the project\'s execution provider' }, { kind: 'end', text: 'Plans and sessions run there' }],
+    endpoints: ['GET /v1/org/providers', 'POST|PATCH /v1/org/providers/:key', 'PATCH /v1/projects/:id/settings'],
+  },
+};

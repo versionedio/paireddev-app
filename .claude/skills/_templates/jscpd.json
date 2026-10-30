@@ -1,0 +1,10 @@
+{
+  "path": ["src"],
+  "ignore": ["**/*.test.*", "**/*.stories.*", "**/config/**", "**/mock/**"],
+  "minLines": 6,
+  "minTokens": 60,
+  "threshold": 3,
+  "reporters": ["console"],
+  "absolute": false,
+  "gitignore": true
+}

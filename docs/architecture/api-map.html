@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PairedDev Requirement Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css?v=3">
+</head>
+<body>
+<main>
+<div class="eyebrow">Traceability</div>
+<h1>Requirement map</h1>
+<p class="lede">Every endpoint and business requirement in <code>product_req.md</code>, and the nostackai asset that serves it. <span class="chip c-ok">full</span> means as written, <span class="chip c-warn">adapted</span> means same outcome by a different mechanism, <span class="chip c-bad">gap</span> means a decision is needed (see <a href="gaps.html">Gaps</a>).</p>
+
+<h2 id="biz">1 · Business requirements</h2>
+<div class="tw"><table>
+<thead><tr><th>#</th><th>Requirement</th><th>How it is met</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Single system of record</td><td>All state in tenant entities; humans and agents write through the same blocks.</td><td><span class="chip c-ok">full</span></td></tr>
+<tr><td>2</td><td>Plan before execute</td><td><code>plan.status</code> must be <code>approved</code> before <code>pd_dev_approve_plan</code> creates the branch or starts the agent. Planner crew has read-only tools.</td><td><span class="chip c-ok">full</span></td></tr>
+<tr><td>3</td><td>Supervised execution; <code>ask</code> halts</td><td>Phase stream from webhooks and <code>get_task</code>; <code>ask</code> becomes plan-time approval on the runner.</td><td><span class="chip c-bad">gap</span> <a href="gaps.html#g-stream">G-01</a></td></tr>
+<tr><td>4</td><td>Humans own outcomes; agents never sign off or approve releases, server-side</td><td>ACL tiers + <code>kind == human</code> check in each block + no agent policy on sign-off / advance / merge / promote / set-owner. See HLD Fig 5.</td><td><span class="chip c-ok">full</span></td></tr>
+<tr><td>5</td><td>Gates at three levels</td><td><code>pd_own_advance_item</code> (card), <code>pd_own_promote_release</code> + <code>preflight_run</code> (release), <code>pd_dev_run_delivery_preflight</code> (cross-project).</td><td><span class="chip c-ok">full</span></td></tr>
+<tr><td>6</td><td>Per-project CLAUDE.md, skills, hooks; tenant-admin hooks not widenable</td><td>Repo files via <code>commit_files</code>; <code>hook.scope</code>; <code>pd_render_hooks</code> with drift check.</td><td><span class="chip c-warn">adapted</span> <a href="gaps.html#g-hooks">G-13</a></td></tr>
+<tr><td>7</td><td>Bring your own model; keys write-only</td><td>Tenant AI settings + per-project <code>exec_provider</code>. Anthropic and Google supported; gateways not.</td><td><span class="chip c-warn">adapted</span> <a href="gaps.html#g-byo">G-05</a> <a href="gaps.html#g-3">G-03</a></td></tr>
+<tr><td>8</td><td>Source control via connector; webhooks keep cards in step</td><td><code>github</code> + <code>github:automation</code>; <code>repo_event</code> landing + <code>pd_sys_apply_repo_event</code>.</td><td><span class="chip c-ok">full</span></td></tr>
+<tr><td>9</td><td>Cadence-aware</td><td><code>project.cadence</code>; sprint blocks and metric kinds; flag <code>sprints</code>.</td><td><span class="chip c-ok">full</span></td></tr>
+<tr><td>10</td><td>Append-only audit</td><td><code>audit_event</code>, <code>lane_transition</code> with update/delete routes excluded.</td><td><span class="chip c-ok">full</span></td></tr>
+<tr><td>11</td><td>Scale: server-side filters, pagination, totals</td><td><code>pd_dev_list_items</code>, indexes.</td><td><span class="chip c-warn">adapted</span> <a href="gaps.html#g-list">G-06</a></td></tr>
+</tbody></table></div>
+
+<h2 id="eps">2 · Endpoints</h2>
+<p>“Entity” means the auto-generated list / get / create / update / delete route of that table, available to roles with a policy for it. Block names omit the <code>pd_&lt;tier&gt;_</code> prefix here; the tier is in the last column.</p>
+
+<h3>Portal, triage, board, drawer</h3>
+<div class="tw"><table>
+<thead><tr><th>Requirement endpoint</th><th>Served by</th><th>Tier</th></tr></thead>
+<tbody>
+<tr><td>GET /v1/requests</td><td>block <code>list_requests</code></td><td>req</td></tr>
+<tr><td>POST /v1/requests</td><td>block <code>submit_request</code></td><td>req</td></tr>
+<tr><td>POST /v1/requests/:id/vote</td><td>block <code>vote_request</code></td><td>req</td></tr>
+<tr><td>POST /v1/triage/run</td><td>block <code>run_triage</code> (ai_call + formulas)</td><td>own</td></tr>
+<tr><td>PATCH /v1/items/:id</td><td>block <code>move_item</code> (lane, bucket, pill)</td><td>dev</td></tr>
+<tr><td>PATCH /v1/items/:id/owner</td><td>block <code>set_owner</code> (humans only)</td><td>own</td></tr>
+<tr><td>PATCH /v1/items/:id/workers</td><td>block <code>set_workers</code></td><td>dev</td></tr>
+<tr><td>GET /v1/items/:id/activity</td><td>entity <code>activity_entry</code> by item lookup, or inside <code>get_item</code></td><td>dev</td></tr>
+<tr><td>POST /v1/items/:id/prompts</td><td>block <code>send_prompt</code></td><td>dev</td></tr>
+<tr><td>GET /v1/items/:id/checklist</td><td>block <code>get_checklist</code></td><td>dev</td></tr>
+<tr><td>POST /v1/items/:id/checklist/:n/signoff</td><td>block <code>signoff_checklist</code> (rejects agents)</td><td>dev</td></tr>
+<tr><td>POST /v1/items/:id/advance</td><td>block <code>advance_item</code> (409 if gate closed)</td><td>own</td></tr>
+<tr><td>POST /v1/items/:id/rebase</td><td>block <code>rebase_item</code></td><td>dev</td></tr>
+<tr><td>GET /v1/audit?actor=</td><td>block <code>get_audit</code></td><td>dev</td></tr>
+<tr><td>GET /v1/deployments</td><td>block <code>get_deployments</code></td><td>dev</td></tr>
+</tbody></table></div>
+
+<h3>Backlog, groups, deliveries</h3>
+<div class="tw"><table>
+<thead><tr><th>Requirement endpoint</th><th>Served by</th><th>Tier</th></tr></thead>
+<tbody>
+<tr><td>GET /v1/items?scope&amp;q&amp;project&amp;tag&amp;bucket&amp;minVotes&amp;since&amp;sort&amp;page</td><td>block <code>list_items</code> (<span class="chip c-warn">adapted</span> G-06)</td><td>dev</td></tr>
+<tr><td>POST /v1/items/bulk</td><td>block <code>bulk_items</code></td><td>dev</td></tr>
+<tr><td>GET/POST/DELETE /v1/items/:id/dependencies</td><td>entity <code>work_item_dependency</code> read; blocks <code>add_dependency</code>, <code>remove_dependency</code></td><td>dev</td></tr>
+<tr><td>GET /v1/projects</td><td>entity <code>project</code></td><td>dev</td></tr>
+<tr><td>GET/POST/PATCH /v1/groups</td><td>entities <code>project_group</code>, <code>project_group_member</code></td><td>own</td></tr>
+<tr><td>GET /v1/deliveries, GET /:id</td><td>entity <code>delivery</code> + items by <code>delivery_id</code> lookup</td><td>dev</td></tr>
+<tr><td>POST /v1/deliveries</td><td>block <code>create_delivery</code></td><td>own</td></tr>
+<tr><td>PATCH /v1/deliveries/:id/items</td><td>block <code>update_delivery_items</code></td><td>own</td></tr>
+<tr><td>POST /v1/deliveries/:id/preflight</td><td>block <code>run_delivery_preflight</code> + crew <code>pd-preflight</code></td><td>dev</td></tr>
+<tr><td>GET/PATCH /v1/permissions</td><td>entity <code>permission_cell</code> read; block <code>update_permissions</code></td><td>adm</td></tr>
+<tr><td>GET/PATCH /v1/notification-preferences</td><td>entity <code>notification_pref</code></td><td>dev</td></tr>
+</tbody></table></div>
+
+<h3>Cadence, metrics, team</h3>
+<div class="tw"><table>
+<thead><tr><th>Requirement endpoint</th><th>Served by</th><th>Tier</th></tr></thead>
+<tbody>
+<tr><td>GET/PATCH /v1/project/settings</td><td>entity <code>project</code>; block <code>update_project_settings</code></td><td>own</td></tr>
+<tr><td>GET /v1/sprints</td><td>entity <code>sprint</code></td><td>dev</td></tr>
+<tr><td>POST /v1/sprints · POST /:id/close</td><td>blocks <code>create_sprint</code>, <code>close_sprint</code></td><td>own</td></tr>
+<tr><td>GET /v1/metrics/flow · cycle-time · throughput · aging · burndown · velocity</td><td>block <code>get_metrics</code> (<code>kind</code>) → Glyph <code>pd_metrics</code></td><td>dev</td></tr>
+<tr><td>POST /v1/retro/digest</td><td>block <code>prepare_retro</code></td><td>dev</td></tr>
+<tr><td>POST /v1/releases/preflight</td><td>block <code>run_release_preflight</code> + crew <code>pd-preflight</code></td><td>dev</td></tr>
+<tr><td>GET /v1/members</td><td>entity <code>member</code></td><td>dev</td></tr>
+<tr><td>POST /v1/invites · DELETE · resend</td><td>blocks <code>invite_member</code>, <code>manage_invite</code></td><td>own</td></tr>
+</tbody></table></div>
+
+<h3>Plan, session, agent configuration, providers</h3>
+<div class="tw"><table>
+<thead><tr><th>Requirement endpoint</th><th>Served by</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>POST /v1/items/:id/plan</td><td>block <code>request_plan</code> + crew <code>pd-planner</code></td><td><span class="chip c-ok">full</span></td></tr>
+<tr><td>POST …/plan/:n/approve · /revise</td><td>blocks <code>approve_plan</code>, <code>revise_plan</code></td><td><span class="chip c-ok">full</span></td></tr>
+<tr><td>GET /v1/items/:id/session (SSE/WS)</td><td>WebSocket <code>customapi_run</code> + entity reads of <code>agent_session</code>, <code>session_step</code></td><td><span class="chip c-bad">gap</span> G-01, G-08</td></tr>
+<tr><td>POST …/session/gate/:n · /resume</td><td>blocks <code>session_gate_decision</code>, <code>resume_session</code></td><td><span class="chip c-bad">gap</span> G-01</td></tr>
+<tr><td>GET/PUT /v1/projects/:id/claude-md</td><td>blocks <code>get_claude_md</code>, <code>put_claude_md</code> (github get_file_contents / commit_files)</td><td><span class="chip c-ok">full</span></td></tr>
+<tr><td>GET/POST/PUT/DELETE …/skills</td><td>blocks <code>list_skills</code>, <code>put_skill</code>, <code>delete_skill</code></td><td><span class="chip c-ok">full</span></td></tr>
+<tr><td>GET …/hooks</td><td>block <code>list_hooks</code> (team + tenant-admin, locked flag)</td><td><span class="chip c-warn">adapted</span> G-13</td></tr>
+<tr><td>GET /v1/org/providers</td><td>block <code>list_providers</code> (status only)</td><td><span class="chip c-ok">full</span></td></tr>
+<tr><td>POST/PATCH /v1/org/providers/:key</td><td>Tenant Settings → AI in the console</td><td><span class="chip c-warn">adapted</span> G-03</td></tr>
+<tr><td>PATCH /v1/projects/:id/settings {executionProvider}</td><td>block <code>update_project_settings</code></td><td><span class="chip c-ok">full</span></td></tr>
+</tbody></table></div>
+
+<h3>Work-tab git operations (section 14)</h3>
+<div class="tw"><table>
+<thead><tr><th>Button</th><th>Connector action</th><th>Block</th></tr></thead>
+<tbody>
+<tr><td>Start work</td><td><code>create_branch</code></td><td><code>approve_plan</code> / <code>git_op</code></td></tr>
+<tr><td>Check branch status</td><td><code>compare_branch</code></td><td><code>git_op</code></td></tr>
+<tr><td>Commit</td><td><code>commit_files</code> (or blob/tree/commit/update_ref for atomic)</td><td><code>git_op</code> (hook check first)</td></tr>
+<tr><td>Open PR</td><td><code>create_pull_request</code></td><td><code>git_op</code></td></tr>
+<tr><td>Request review</td><td><code>request_reviewers</code></td><td><code>git_op</code></td></tr>
+<tr><td>Submit review</td><td><code>submit_review</code></td><td><code>submit_review</code> (agent → COMMENT)</td></tr>
+<tr><td>Checks</td><td><code>list_check_runs</code></td><td><code>git_op</code></td></tr>
+<tr><td>Trigger workflow</td><td><code>dispatch_workflow</code></td><td><code>git_op</code></td></tr>
+<tr><td>Merge</td><td><code>merge_pull_request</code></td><td><code>merge_pr</code> (human, expected SHA)</td></tr>
+<tr><td>Create linked issue</td><td><code>create_issue</code></td><td><code>git_op</code></td></tr>
+</tbody></table></div>
+
+<h2 id="screens">3 · Screens → assets</h2>
+<div class="tw"><table>
+<thead><tr><th>Screen</th><th>Reads</th><th>Writes (blocks)</th><th>Flag</th></tr></thead>
+<tbody>
+<tr><td>Portal</td><td>list_requests</td><td>submit_request, vote_request</td><td><code>portal</code></td></tr>
+<tr><td>Triage</td><td>list_items (bucket)</td><td>run_triage, move_item</td><td>—</td></tr>
+<tr><td>Board + drawer</td><td>list_items, get_item, WebSocket</td><td>move_item, advance_item, signoff_checklist, send_prompt, rebase_item</td><td>—</td></tr>
+<tr><td>Work tab</td><td>get_item, WebSocket</td><td>request_plan, approve_plan, revise_plan, git_op, merge_pr, session_gate_decision, resume_session</td><td><code>plan-preview</code>, <code>live-session</code></td></tr>
+<tr><td>Backlog</td><td>list_items</td><td>bulk_items</td><td><code>bulk-actions</code></td></tr>
+<tr><td>Deliveries</td><td>delivery, items</td><td>create_delivery, update_delivery_items, run_delivery_preflight</td><td><code>deliveries</code>, <code>cross-project-preflight</code></td></tr>
+<tr><td>Releases</td><td>get_deployments</td><td>run_release_preflight, promote_release</td><td>—</td></tr>
+<tr><td>Sprints</td><td>sprint</td><td>create_sprint, close_sprint</td><td><code>sprints</code></td></tr>
+<tr><td>Analytics</td><td>get_metrics</td><td>prepare_retro</td><td><code>retro-digest</code></td></tr>
+<tr><td>Activity</td><td>get_audit</td><td>—</td><td>—</td></tr>
+<tr><td>Team</td><td>member, invite, permission_cell, notification_pref, list_providers</td><td>invite_member, manage_invite, update_permissions</td><td><code>providers-tab</code></td></tr>
+<tr><td>Agent configuration</td><td>get_claude_md, list_skills, list_hooks</td><td>put_claude_md, put_skill, update_hooks</td><td><code>agent-config</code></td></tr>
+</tbody></table></div>
+</main>
+<script src="assets/docs.js?v=3"></script>
+</body>
+</html>

@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PairedDev Build Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css?v=3">
+</head>
+<body>
+<main>
+<div class="eyebrow">Build plan</div>
+<h1>Order of work through MCP</h1>
+<p class="lede">Nothing below has been run. Every step is an MCP call against org <code>paired-egih</code>; no nostackai source is touched. The order follows the platform's own rule: entities first, then logic, then pointing the app at the app API.</p>
+
+<figure class="fig"><figcaption>Fig 1 · Phases and dependencies</figcaption><div class="body">
+<pre class="mermaid">
+flowchart LR
+  classDef gate fill:#9a6a1f,stroke:#e0a850,color:#fff
+  classDef p fill:#4a5166,stroke:#8b93a7,color:#fff
+  P0["P0 Decisions + preconditions"]:::gate --> P1["P1 Entities + flags"]:::p
+  P1 --> P2["P2 Access + bootstrap"]:::p
+  P2 --> P3["P3 Portal + board blocks"]:::p
+  P3 --> P4["P4 GitHub + webhooks"]:::p
+  P4 --> P5["P5 Plan + agent session"]:::p
+  P3 --> P6["P6 Planning + analytics"]:::p
+  P5 --> P7["P7 Agent config + providers"]:::p
+  P6 --> P8["P8 Readiness, docs, export"]:::p
+  P7 --> P8
+</pre></div></figure>
+
+<h2 id="p0">P0 · Decisions and preconditions</h2>
+<ul>
+<li>Answer the eight items on the <a href="gaps.html#decide">Gaps</a> page.</li>
+<li>Confirm in the console: org tenancy is <b>multi</b>, plan tier, front-end domain.</li>
+<li><b>Spike (10 minutes):</b> create a throw-away entity with an <code>autoincrement</code> and a <code>formula</code> column, one Logic Block, and read <code>list_tenant_acl_policies</code>. Settles G-11 and G-22 before anything depends on them. Delete the spike afterwards.</li>
+<li>Adopt connectors with <code>setup_connector</code>: <code>github</code> (named <code>github</code>, personal), <code>github</code> (named <code>automation</code>, shared), <code>muse-code</code> (<code>main</code>), <code>slack</code> (<code>notify</code>), <code>email</code>, <code>s3</code>. Then <code>describe_connector</code> each to confirm exact action fields (merge SHA, create_branch ref).</li>
+</ul>
+
+<h2 id="p1">P1 · Entities and flags</h2>
+<ol>
+<li><code>create_entity</code> in dependency order: member → project → project_group → project_group_member → sprint → delivery → work_item → work_item_worker / vote / dependency → checklist_item → activity_entry → audit_event → lane_transition → flow_snapshot → repo_event → plan → agent_session → session_step → session_gate → hook → project_skill → preflight_run → retro_digest → permission_cell → notification_pref → invite.</li>
+<li>Pass a <code>description</code> on every entity (stored as its summary; it flows into the Architecture Studio and OpenAPI).</li>
+<li><code>create_feature_flag</code> for the twelve keys on the integrations page (trim to ten on a Free plan).</li>
+</ol>
+<p><b>Check:</b> <code>list_entities</code> shows 27 new entries plus the 7 platform ones; each lookup target exists; no entity has more than 5 lookups.</p>
+
+<h2 id="p2">P2 · Access and bootstrap</h2>
+<ol>
+<li><code>create_tenant_acl_policy</code>: <code>pd-requester</code>, <code>pd-dev</code>, <code>pd-owner</code>, <code>pd-admin</code>, <code>pd-agent</code>. Deny direct create/update/delete on governed entities by simply not granting them.</li>
+<li><code>set_default_member_access</code> → <code>pd-requester</code> (the least-privileged policy a new user needs: submit and vote). I will state this choice when done; admins raise anyone with <code>assign_user_acl</code>.</li>
+<li><code>create_glyph</code> + <code>publish_glyph</code> <code>pd_bootstrap_tenant</code>; run with <code>invoke_glyph</code> for tenant <code>2vrdf</code>.</li>
+<li><code>assign_user_acl</code>: the existing admin user gets <code>pd-owner</code> in addition to <code>adminacl</code>.</li>
+</ol>
+<p><b>Check:</b> <code>list_tenant_acl_policies</code>; <code>invoke_glyph</code> output lists permission cells created.</p>
+
+<h2 id="p3">P3 · Portal and board</h2>
+<ol>
+<li>Create blocks: submit_request, vote_request, list_requests, list_items, get_item, move_item, set_owner, set_workers, advance_item, signoff_checklist, get_checklist, send_prompt, bulk_items, add/remove_dependency, get_audit.</li>
+<li>Create <code>run_triage</code>, which needs a tenant AI provider.</li>
+<li>Seed with <code>pd_seed_demo</code> through <code>invoke_glyph</code> (dev only).</li>
+</ol>
+<p><b>Check:</b> <code>test_logicblock</code> for each happy path and each rejection (agent sign-off → 403, gate closed → 409, duplicate vote → toggle). Writes are real, so test on tenant <code>2vrdf</code> only.</p>
+
+<h2 id="p4">P4 · GitHub and webhooks</h2>
+<ol>
+<li><code>set_connector_webhook_landing</code> for the five GitHub events into <code>repo_event</code> (insert).</li>
+<li><code>create_event</code> on <code>repo_event</code> after create → <code>custom_api</code> <code>pd_sys_apply_repo_event</code>.</li>
+<li>Create <code>git_op</code>, <code>submit_review</code>, <code>merge_pr</code>, <code>get_deployments</code>.</li>
+<li>Hand the tenant admin the checklist from <a href="integrations.html#settings">Integrations §5</a>. Then <code>get_connector_webhook_info</code> for the URL.</li>
+</ol>
+<p><b>Check:</b> <code>invoke_connector_action</code> <code>get_repository</code> on a test repo; push to a test branch; <code>list_connector_logs</code> shows a 2xx delivery; <code>list_event_deliveries</code> shows the block ran; the card's pill changed.</p>
+
+<h2 id="p5">P5 · Plan and agent session</h2>
+<ol>
+<li>Crews <code>pd-planner</code>, <code>pd-checklist-reviewer</code>, <code>pd-preflight</code> (created as drafts, then <code>update_crew</code> to staged → active). Their repo access is <code>connector.invoke</code> tools, one per GitHub action (<code>get_file_contents</code>, <code>compare_branch</code>, <code>list_pull_request_files</code>), pointed at <code>github</code> for person-started runs and <code>github:automation</code> for webhook-started runs. No repo Glyph is needed (<a href="gaps.html#g-crewtool">G-10</a>).</li>
+<li>Blocks: request_plan, revise_plan, approve_plan, session_gate_decision, resume_session, rebase_item, post_step, escalate_item, record_precheck, comment_review, sync_session.</li>
+<li>One-time repo setup via the connector's <code>setup_workflow</code>, <code>setup_permissions</code>, <code>setup_secret</code> (needs a repo-admin token from the tenant).</li>
+<li>Schedules <code>sync-sessions</code> and <code>flow-snapshot</code> (paid plan).</li>
+</ol>
+<p><b>Check:</b> request a plan on a seeded card, approve it, see a branch appear, a runner start, a PR open, a checklist pre-check land, and a human sign-off advance the card. Confirm that calling <code>signoff</code> as the agent identity returns 403.</p>
+
+<h2 id="p6">P6 · Planning and analytics</h2>
+<ol>
+<li>Blocks: create_sprint, close_sprint, create_delivery, update_delivery_items, run_release_preflight, run_delivery_preflight, promote_release, get_metrics, prepare_retro; Glyph <code>pd_metrics</code>; crew <code>pd-preflight</code>.</li>
+<li>Events for blocked items, plan ready, session paused, invite sent.</li>
+</ol>
+<p><b>Check:</b> <code>invoke_glyph</code> <code>pd_metrics</code> across 7/14/30/90-day ranges gives consistent slices; the seeded two-branch overlap on <code>queue/retry.ts</code> is flagged by pre-flight.</p>
+
+<h2 id="p7">P7 · Agent configuration and providers</h2>
+<p>Blocks: get/put_claude_md, list/put/delete_skill, list/update_hooks, update_tenant_hooks, Glyph <code>pd_render_hooks</code>, list_providers, update_project_settings, invite_member, manage_invite, update_permissions.</p>
+<p><b>Check:</b> committing CLAUDE.md creates a commit on the default branch and updates the stored sha; editing the file in GitHub then syncing shows drift.</p>
+
+<h2 id="p8">P8 · Readiness, descriptions, export</h2>
+<ol>
+<li><code>get_tenant_readiness</code> for each tenant; give the tenant admin the remaining steps.</li>
+<li><code>get_asset_descriptions</code>; fill any gap with <code>set_asset_description</code> so the Architecture Studio and OpenAPI explain every asset.</li>
+<li><code>export_metadata</code> to keep a copy of all definitions in the repo (<code>backend/export/</code>) for review and recovery.</li>
+<li>Set Allowed Domains and App URL once the domain exists.</li>
+<li>Production: console deploy (publish → activate), later.</li>
+</ol>
+
+<h2 id="onboard">Runbook · onboarding a new customer tenant</h2>
+<figure class="fig"><figcaption>Fig 2 · New tenant</figcaption><div class="body">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  actor SA as PairedDev admin
+  actor TA as Tenant admin
+  participant CON as nostackai console
+  participant MCP as MCP
+  participant APP as App API
+  SA->>CON: create tenant (no MCP tool exists)
+  SA->>MCP: list_org_tenants to confirm code
+  TA->>CON: sign in, Tenant Settings → AI: key + model
+  TA->>CON: Tenant Settings → Connectors: github:automation, muse-code:main, slack:notify
+  TA->>CON: General: slack_channel, branch_pattern
+  SA->>MCP: assign_user_acl (tenant admin gets pd-admin)
+  SA->>MCP: set_default_member_access pd-requester
+  SA->>APP: invoke pd_adm_bootstrap_tenant
+  APP-->>SA: permission cells, default hooks, notification prefs
+  SA->>APP: create flow-snapshot and sync-sessions schedules
+  TA->>TA: add webhook in the GitHub repo (URL from get_connector_webhook_info)
+  TA->>APP: run repo setup block (workflow, permissions, secret)
+  TA->>APP: each dev saves a personal GitHub token in their profile
+  SA->>MCP: get_tenant_readiness → no next_steps
+</pre></div></figure>
+
+<h2 id="verify">How we verify without a front-end</h2>
+<div class="tw"><table>
+<thead><tr><th>Tool</th><th>Proves</th></tr></thead>
+<tbody>
+<tr><td><code>test_logicblock</code></td><td>Each block's branches and rejections</td></tr>
+<tr><td><code>invoke_glyph</code></td><td>Metrics, snapshots, seeding, hook rendering</td></tr>
+<tr><td><code>invoke_connector_action</code></td><td>GitHub and runner calls with the real tenant credential</td></tr>
+<tr><td><code>list_connector_logs</code>, <code>list_event_deliveries</code></td><td>Webhook landed; automation fired; no silent skips</td></tr>
+<tr><td><code>get_tenant_readiness</code></td><td>Nothing missing for a tenant</td></tr>
+<tr><td>REST with a test user token (curl)</td><td>ACL: requester cannot call dev blocks; agent cannot sign off. MCP cannot prove this, it needs a real app user</td></tr>
+</tbody></table></div>
+<div class="callout"><b>Cost note.</b> Tests, seeding and each record written count as API calls against the plan.</div>
+</main>
+<script src="assets/docs.js?v=3"></script>
+</body>
+</html>

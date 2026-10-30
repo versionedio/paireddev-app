@@ -1,0 +1,23 @@
+{
+  "extends": ["stylelint-config-standard"],
+  "rules": {
+    "color-no-hex": true,
+    "function-disallowed-list": ["rgb", "rgba", "hsl", "hsla", "oklch", "oklab", "lab", "lch", "hwb"],
+    "declaration-property-value-disallowed-list": {
+      "font-family": ["/^(?!var\\()/"],
+      "font-size": ["/^(?!var\\()/"],
+      "font-weight": ["/^(?!var\\()/"],
+      "line-height": ["/^(?!var\\()/"],
+      "color": ["/^(?!var\\()/", "/^(?!inherit|currentcolor|transparent)/"],
+      "background-color": ["/^(?!var\\()/"],
+      "border-radius": ["/^(?!var\\()/"],
+      "z-index": ["/^(?!var\\()/"]
+    },
+    "declaration-no-important": true,
+    "selector-max-id": 0
+  },
+  "overrides": [
+    { "files": ["src/theme/**/*.css"], "rules": {
+      "color-no-hex": null, "function-disallowed-list": null, "declaration-property-value-disallowed-list": null } }
+  ]
+}

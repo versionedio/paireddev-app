@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PairedDev Backend Assets</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css?v=3">
+</head>
+<body>
+<main>
+<div class="eyebrow">Logic Blocks · Glyphs · Agents · Automations</div>
+<h1>The behaviour layer</h1>
+<p class="lede">Entities hold data; these assets decide what is allowed. Logic Blocks are the default. A Glyph is used only where a real programming language is needed. Crews are used only where an agent needs tools or a human pause.</p>
+
+<div class="stat"><div><b>~55</b><span>Logic Blocks</span></div><div><b>5</b><span>Glyphs</span></div><div><b>3</b><span>Crews</span></div><div><b>6</b><span>Events</span></div><div><b>2</b><span>Schedules</span></div></div>
+
+<h2 id="naming">1 · Naming blocks for access control</h2>
+<p>A user's route policy is cached and capped near 8 KB — roughly 12 individually named blocks. We have ~55, so blocks carry a tier prefix and ACL policies grant by prefix (<code>pd_dev_*</code>) instead of listing names.</p>
+<figure class="fig"><figcaption>Fig 1 · Tiers and who may call them</figcaption><div class="body">
+<pre class="mermaid">
+flowchart LR
+  classDef human fill:#3b5b9a,stroke:#7da2e8,color:#fff
+  classDef ai fill:#9a6a1f,stroke:#e0a850,color:#fff
+  classDef sys fill:#4a5166,stroke:#8b93a7,color:#fff
+  REQ["Requester policy"]:::human --> T1["pd_req_*<br/>submit, vote, portal list"]:::sys
+  DEV["Dev policy"]:::human --> T1
+  DEV --> T2["pd_dev_*<br/>board, drawer, plan, session, git, sign-off, preflight, metrics"]:::sys
+  OWN["Owner policy"]:::human --> T1
+  OWN --> T2
+  OWN --> T3["pd_own_*<br/>set owner, advance, promote, sprints, deliveries, triage, settings, invites"]:::sys
+  ADM["Tenant admin policy"]:::human --> T1
+  ADM --> T2
+  ADM --> T3
+  ADM --> T4["pd_adm_*<br/>permissions, tenant hooks, bootstrap"]:::sys
+  AGT["Agent identity policy"]:::ai --> T5["pd_agt_*<br/>record pre-check, post step, escalate, COMMENT review"]:::sys
+  AGT --> R["read-only pd_dev_get_*, list_*"]:::sys
+  EVT["Events and Schedules"]:::sys --> T6["pd_sys_*<br/>apply_repo_event, sync_session<br/>not granted to any user"]:::sys
+</pre></div></figure>
+<div class="callout warn"><b>To verify at build time:</b> the exact route/action name a Logic Block gets (for example <code>createpd_dev_get_item</code> vs another shape). Create one block, then read <code>list_tenant_acl_policies</code> before writing the wildcard statements. The ACL guide only documents the convention for entities.</div>
+
+<h2 id="blocks">2 · Logic Block catalogue</h2>
+<p>“Req endpoint” points to the route in <code>product_req.md</code>. The full mapping, including GET routes served directly by an entity, is in the <a href="api-map.html">requirement map</a>.</p>
+
+<h3>Portal and board</h3>
+<div class="tw"><table>
+<thead><tr><th>Block</th><th>What it does</th><th>Key steps</th><th>Req endpoint</th></tr></thead>
+<tbody>
+<tr><td><code>pd_req_submit_request</code></td><td>Validates title ≥ 6 chars, creates the item in backlog with 1 vote, records submitter.</td><td>condition → create_entity ×3 (item, vote, audit)</td><td>POST /requests</td></tr>
+<tr><td><code>pd_req_vote_request</code></td><td>Toggles the caller's vote and recomputes <code>votes</code> and <code>score</code>.</td><td>get_entity vote → create/delete → list count → formula → update</td><td>POST /requests/:id/vote</td></tr>
+<tr><td><code>pd_req_list_requests</code></td><td>Portal feed with sort and status mapped from lane (done→Shipped …).</td><td>list_entities → transform</td><td>GET /requests</td></tr>
+<tr><td><code>pd_dev_list_items</code></td><td>Backlog query: scope, search, project, tags, bucket, vote floor, since, sort, page → items + <b>total</b>.</td><td>list_entities + attrFilters → transform filter/sort/slice → count</td><td>GET /items</td></tr>
+<tr><td><code>pd_dev_get_item</code></td><td>One call for the drawer: item, owner, workers, checklist, dependencies, delivery, latest plan, session.</td><td>get_entity + several list_entities</td><td>GET /items/:id …</td></tr>
+<tr><td><code>pd_dev_move_item</code></td><td>Drag between lanes where no gate applies. Rewrites the pill for Done/Backlog/Staged. Writes <code>lane_transition</code>.</td><td>condition (allowed edge?) → update_entity → create ×2</td><td>PATCH /items/:id</td></tr>
+<tr><td><code>pd_own_advance_item</code></td><td>One lane forward. 409 unless every checklist item has a human signature (cards the agent never touched are exempt).</td><td>list checklist → condition → update → create ×2</td><td>POST /items/:id/advance</td></tr>
+<tr><td><code>pd_dev_bulk_items</code></td><td>Tag, bucket, project, delivery, send to triage for a list of ids. Returns the sentence the toast shows.</td><td>loop → update_entity (runAsync for long lists)</td><td>POST /items/bulk</td></tr>
+<tr><td><code>pd_own_set_owner</code></td><td>Reassign owner. Rejects any member whose kind is <code>agent</code>.</td><td>get_entity member → condition → update</td><td>PATCH /items/:id/owner</td></tr>
+<tr><td><code>pd_dev_set_workers</code></td><td>Add/remove workers (humans, Claude).</td><td>create/delete work_item_worker</td><td>PATCH /items/:id/workers</td></tr>
+<tr><td><code>pd_dev_add_dependency</code> / <code>remove_</code></td><td>Cross-project links.</td><td>create/delete</td><td>POST/DELETE /items/:id/dependencies</td></tr>
+<tr><td><code>pd_dev_send_prompt</code></td><td>Appends the human entry, queues an agent acknowledgement.</td><td>create activity_entry → (agent path) → notifyall</td><td>POST /items/:id/prompts</td></tr>
+<tr><td><code>pd_own_run_triage</code></td><td>For each untagged item: one <code>ai_call</code> returning impact, effort, category; tags and score computed by formula steps, not by the model.</td><td>list → loop → ai_call(json) → formula → update</td><td>POST /triage/run</td></tr>
+</tbody></table></div>
+
+<h3>Review gate</h3>
+<div class="tw"><table>
+<thead><tr><th>Block</th><th>What it does</th><th>Key steps</th><th>Req endpoint</th></tr></thead>
+<tbody>
+<tr><td><code>pd_dev_signoff_checklist</code></td><td>Sets one item's human signature. Rejects agent identities (layer 2 of Fig 5 in the HLD). Supports “sign all / clear all” via a flag.</td><td>get member → condition kind==human → update → audit</td><td>POST …/checklist/:n/signoff</td></tr>
+<tr><td><code>pd_agt_record_precheck</code></td><td>Writes <code>ai_checked</code> and <code>ai_reasoning</code> only. Cannot touch <code>signed</code>.</td><td>update_entity (two fields)</td><td>(agent path)</td></tr>
+<tr><td><code>pd_dev_get_checklist</code></td><td>Items with reasoning.</td><td>list_entities</td><td>GET …/checklist</td></tr>
+</tbody></table></div>
+
+<h3>Agent work</h3>
+<div class="tw"><table>
+<thead><tr><th>Block</th><th>What it does</th><th>Key steps</th><th>Req endpoint</th></tr></thead>
+<tbody>
+<tr><td><code>pd_dev_request_plan</code></td><td>Runs the planner crew (read-only), stores a <code>plan</code> row <code>awaiting</code>. No repo writes.</td><td>run_crew → create_entity plan → update pill</td><td>POST /items/:id/plan</td></tr>
+<tr><td><code>pd_dev_revise_plan</code></td><td>“Send back with notes”: requires a non-empty note, supersedes the plan, re-runs the crew with the note.</td><td>condition → update → run_crew → create</td><td>POST …/plan/:n/revise</td></tr>
+<tr><td><code>pd_dev_approve_plan</code></td><td>Human approval. Creates the unique branch, starts the coding agent, opens an <code>agent_session</code>.</td><td>see Fig 2</td><td>POST …/plan/:n/approve</td></tr>
+<tr><td><code>pd_dev_session_gate_decision</code></td><td>Approve or deny a paused write. Depends on <a href="gaps.html#g-stream">G-01</a>.</td><td>update session_gate → resume or stop</td><td>POST …/session/gate/:n</td></tr>
+<tr><td><code>pd_dev_resume_session</code></td><td>Sends an instruction to an idle session.</td><td>connector muse-code (new task on same branch)</td><td>POST …/session/resume</td></tr>
+<tr><td><code>pd_dev_rebase_item</code></td><td>Asks the agent to rebase; clears <code>blocked</code> when done.</td><td>connector → update pill → activity</td><td>POST /items/:id/rebase</td></tr>
+<tr><td><code>pd_agt_post_step</code> / <code>escalate_item</code></td><td>Agent reports a step, or sets <code>blocked</code> with a plain-language reason.</td><td>create session_step / update item</td><td>(agent path)</td></tr>
+<tr><td><code>pd_sys_sync_session</code></td><td>Reads the runner's state via <code>get_task</code>, updates session and pill. Safety net for missed webhooks.</td><td>list running → loop → connector get_task → update</td><td>(schedule / event)</td></tr>
+</tbody></table></div>
+
+<figure class="fig"><figcaption>Fig 2 · <code>pd_dev_approve_plan</code></figcaption><div class="body">
+<pre class="mermaid">
+flowchart TB
+  classDef step fill:#4a5166,stroke:#8b93a7,color:#fff
+  classDef stop fill:#9a3b3b,stroke:#e08a8a,color:#fff
+  classDef ext fill:#1f6f78,stroke:#59c2cc,color:#fff
+  classDef ok fill:#2f6b46,stroke:#6fd29a,color:#fff
+  A["get_entity member by context.userId"]:::step --> B{"kind == human?"}
+  B -- no --> E1["end 403, audit denied"]:::stop
+  B -- yes --> C["get_entity plan"]:::step
+  C --> D{"status == awaiting?"}
+  D -- no --> E2["end 409 plan not awaiting"]:::stop
+  D -- yes --> F["get_entity project: repo, default branch, provider"]:::step
+  F --> G["update_entity plan: approved, decided_by, decided_at"]:::step
+  G --> H["connector github.create_branch<br/>name = pattern + item key"]:::ext
+  H --> I["connector muse-code.start_task<br/>prompt from plan, branch, model"]:::ext
+  I --> J["create_entity agent_session: running, run_handle"]:::step
+  J --> K["update_entity work_item: lane inprogress, pill Claude coding"]:::step
+  K --> L["create lane_transition + audit_event + activity_entry"]:::step
+  L --> M["end 200 session id"]:::ok
+</pre></div></figure>
+
+<h3>Git, review, release</h3>
+<div class="tw"><table>
+<thead><tr><th>Block</th><th>What it does</th><th>Rules</th></tr></thead>
+<tbody>
+<tr><td><code>pd_dev_git_op</code></td><td>Whitelisted dispatcher for create_branch, compare_branch, commit_files, create_pull_request, request_reviewers, list_check_runs, dispatch_workflow, create_issue. Appends one compact activity entry.</td><td>Allow-list of action ids; commit paths checked against <code>hook</code> rows (<code>block</code> refuses, <code>ask</code> creates a <code>session_gate</code>).</td></tr>
+<tr><td><code>pd_dev_submit_review</code></td><td>Human review submit.</td><td>An agent-identity caller is forced to <code>COMMENT</code> (also reachable as <code>pd_agt_comment_review</code>).</td></tr>
+<tr><td><code>pd_dev_merge_pr</code></td><td>Merges using the caller's own GitHub token so repository rules still apply.</td><td>Caller must be a human and the card owner or product owner; sends expected head SHA from <code>work_item.head_sha</code>; moved branch fails instead of landing. Never callable by agent routes.</td></tr>
+<tr><td><code>pd_sys_apply_repo_event</code></td><td>Applies one <code>repo_event</code>: PR opened/closed, review, check_suite, workflow_run, push.</td><td>Idempotent via <code>applied</code>. Finds card by <code>branch</code>, falls back to <code>pr_url</code>. Behind-main detection sets <code>blocked</code>.</td></tr>
+<tr><td><code>pd_dev_run_release_preflight</code></td><td>Collects each staged branch's changed files and runs the pre-flight crew. Stores a <code>preflight_run</code>.</td><td>Crew proposes an order but never decides; <code>cleared</code> is set by a human acknowledging conflicts or by zero findings.</td></tr>
+<tr><td><code>pd_dev_run_delivery_preflight</code></td><td>Same across projects, paths namespaced by project code.</td><td>Gated deliveries only.</td></tr>
+<tr><td><code>pd_own_promote_release</code></td><td>Moves staged → done for the cleared set.</td><td>409 unless the latest preflight is cleared. Human only.</td></tr>
+<tr><td><code>pd_dev_get_deployments</code></td><td>Pipeline view: integration / staging / production columns and CI strips from <code>work_item.ci_*</code>.</td><td>Read-only.</td></tr>
+</tbody></table></div>
+
+<h3>Planning, insight, admin</h3>
+<div class="tw"><table>
+<thead><tr><th>Block</th><th>What it does</th></tr></thead>
+<tbody>
+<tr><td><code>pd_own_create_sprint</code> / <code>close_sprint</code></td><td>Validates name ≥ 3. Close takes <code>{unfinished: next|backlog}</code>; “backlog” resets lane and pill and logs transitions.</td></tr>
+<tr><td><code>pd_own_create_delivery</code> / <code>update_delivery_items</code></td><td>Name, mode, item set; add/remove members.</td></tr>
+<tr><td><code>pd_dev_get_metrics</code></td><td>Calls Glyph <code>pd_metrics</code>; one block, <code>kind</code> chooses flow / cycle-time / throughput / aging / burndown / velocity, arbitrary <code>from</code>/<code>to</code>.</td></tr>
+<tr><td><code>pd_dev_prepare_retro</code></td><td>Reads audit + transitions for the range; groups into the four categories; <code>ai_call summarize</code> writes the note per group; outliers are computed, not generated.</td></tr>
+<tr><td><code>pd_dev_get_audit</code></td><td>Audit list filtered by actor kind, paged.</td></tr>
+<tr><td><code>pd_own_invite_member</code> / <code>manage_invite</code></td><td>Email validated, role, event sends the invite email. Resend / revoke.</td></tr>
+<tr><td><code>pd_adm_update_permissions</code></td><td>Writes <code>permission_cell</code>; rejects changes to locked cells.</td></tr>
+<tr><td><code>pd_own_update_project_settings</code></td><td>Cadence, execution provider, repo binding, unattended policy. Execution provider must be one the tenant has configured.</td></tr>
+<tr><td><code>pd_dev_get_claude_md</code> / <code>pd_own_put_claude_md</code></td><td>Reads <code>CLAUDE.md</code> with <code>get_file_contents</code>; commits with <code>commit_files</code> and stores the new sha.</td></tr>
+<tr><td><code>pd_dev_list_skills</code>, <code>pd_own_put_skill</code>, <code>delete_skill</code></td><td>Read/commit <code>.claude/skills/&lt;name&gt;/SKILL.md</code>; refresh <code>project_skill</code>.</td></tr>
+<tr><td><code>pd_dev_list_hooks</code>, <code>pd_own_update_hooks</code>, <code>pd_adm_update_tenant_hooks</code></td><td>Team rows vs tenant-admin rows. The Glyph <code>pd_render_hooks</code> turns both into <code>.claude/settings.json</code>; tenant-admin rows are always emitted first and cannot be overridden by a team row.</td></tr>
+<tr><td><code>pd_dev_list_providers</code></td><td>Which AI providers the tenant has ready, for the execution-provider select. Status only; keys are never returned.</td></tr>
+<tr><td><code>pd_adm_bootstrap_tenant</code></td><td>Runs Glyph <code>pd_bootstrap_tenant</code> for a new tenant.</td></tr>
+</tbody></table></div>
+
+<h2 id="glyphs">3 · Glyphs</h2>
+<p>All JavaScript. Each is justified because a Logic Block cannot do the job.</p>
+<div class="tw"><table>
+<thead><tr><th>Glyph</th><th>Why code</th><th>SDK used</th><th>Size</th></tr></thead>
+<tbody>
+<tr><td><code>pd_metrics</code></td><td>Builds cumulative-flow, histogram, weekly throughput, aging, burndown and velocity from transitions and snapshots for any date range.</td><td><code>ctx.app_db</code></td><td>small; large only if timing demands (Pro)</td></tr>
+<tr><td><code>pd_snapshot_flow</code></td><td>Per project, counts items per lane and writes one <code>flow_snapshot</code> per day.</td><td><code>ctx.app_db</code></td><td>small</td></tr>
+<tr><td><code>pd_render_hooks</code></td><td>Merges tenant-admin and team hooks into settings JSON and diffs against the repo copy.</td><td><code>ctx.app_db</code>, <code>ctx.connector.invoke</code></td><td>small</td></tr>
+<tr><td><code>pd_bootstrap_tenant</code></td><td>Seeds <code>permission_cell</code>, default tenant-admin hooks, default notification prefs.</td><td><code>ctx.app_db</code> batch create</td><td>small</td></tr>
+<tr><td><code>pd_seed_demo</code></td><td>Loads the prototype's 24 curated and 120 generated items so the board is not empty. Dev tier, behind a flag.</td><td><code>ctx.app_db</code> batch create</td><td>small</td></tr>
+</tbody></table></div>
+<div class="callout"><b>Glyph lifecycle.</b> <code>create_glyph</code> → test with <code>invoke_glyph</code> → <code>publish_glyph</code>. Blocks call the <i>active</i> version. <code>ctx.http</code> is blocked until the org lists at least one allowed outbound domain; none of the above need it.</div>
+
+<h2 id="crews">4 · Agents (Crews) and AI calls</h2>
+<p>A single model call is an <code>ai_call</code> step. A Crew is used only where an agent needs tools or may need to pause. In every case the crew <i>returns</i> its result and a Logic Block writes the record, so a crew never has a back door into governed tables.</p>
+<figure class="fig"><figcaption>Fig 3 · Agent topology</figcaption><div class="body">
+<pre class="mermaid">
+flowchart TB
+  classDef ai fill:#9a6a1f,stroke:#e0a850,color:#fff
+  classDef sys fill:#4a5166,stroke:#8b93a7,color:#fff
+  classDef ext fill:#1f6f78,stroke:#59c2cc,color:#fff
+  subgraph P["pd-planner crew"]
+    P1["reader agent<br/>tools: connector.invoke github (get_file_contents, compare_branch), data.read"]:::ai --> P2["planner agent<br/>output: files, order, risks"]:::ai
+  end
+  subgraph V["pd-checklist-reviewer crew"]
+    V1["diff reader<br/>connector.invoke github (list_pull_request_files, get_file_contents)"]:::ai --> V2["checker agent<br/>4 verdicts + reasoning,<br/>states what it did not do"]:::ai
+  end
+  subgraph F["pd-preflight crew"]
+    F1["overlap finder<br/>data.read work_item, connector.invoke github (compare_branch)"]:::ai --> F2["assessor agent<br/>impact, failure mode, order<br/>stops at product call"]:::ai
+  end
+  B1["pd_dev_request_plan"]:::sys --> P
+  B2["pd_sys_apply_repo_event<br/>on PR opened"]:::sys --> V
+  B3["pd_dev_run_*_preflight"]:::sys --> F
+  P --> R["connector.invoke tools<br/>github (person-started runs)<br/>github:automation (webhook-started)"]:::sys
+  V --> R
+  F --> R
+  R --> GH["GitHub connector"]:::ext
+  T["pd_own_run_triage"]:::sys --> AC1["ai_call classify + score"]:::ai
+  RT["pd_dev_prepare_retro"]:::sys --> AC2["ai_call summarize"]:::ai
+</pre></div></figure>
+<div class="tw"><table>
+<thead><tr><th>Capability</th><th>Mechanism</th><th>Provider</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Triage: impact, effort, category</td><td><code>ai_call</code> (json out) inside a loop</td><td>Tenant default; Gemini or Anthropic</td><td>Requirement 7 allows Google for triage, scoring, summaries. Tags and composite score are formula steps.</td></tr>
+<tr><td>Plan Preview</td><td>Crew <code>pd-planner</code></td><td>Project <code>exec_provider</code> (Anthropic)</td><td>Read-only tools. Revision loop is a block, not a crew graph.</td></tr>
+<tr><td>Coding session</td><td>Connector <code>muse-code</code> on a GitHub runner</td><td>Anthropic via the connector's <code>ai_provider</code> / <code>ai_model</code></td><td>See <a href="gaps.html#g-stream">G-01</a>.</td></tr>
+<tr><td>Checklist pre-check</td><td>Crew <code>pd-checklist-reviewer</code></td><td>Anthropic</td><td>Output feeds <code>record_precheck</code>. Comments reach GitHub as <code>COMMENT</code> only.</td></tr>
+<tr><td>Release / delivery pre-flight</td><td>Crew <code>pd-preflight</code></td><td>Anthropic</td><td>Must say when it stops: ordering a release is a product call.</td></tr>
+<tr><td>Retro digest</td><td><code>ai_call summarize</code></td><td>Tenant default</td><td>Groups are computed; the model writes only the one-line note per group.</td></tr>
+</tbody></table></div>
+<p>Crew lifecycle: created as <code>draft</code>, then <code>staged</code> → <code>active</code> with <code>update_crew</code>. Only active crews can be invoked, so the build plan includes the promotion step. Each agent node can name a tenant provider; a provider the tenant lacks fails clearly rather than falling back.</p>
+
+<h2 id="events">5 · Events and schedules</h2>
+<div class="tw"><table>
+<thead><tr><th>Trigger</th><th>Type</th><th>Does</th></tr></thead>
+<tbody>
+<tr><td><code>repo_event</code> after create</td><td><code>custom_api</code></td><td>Runs <code>pd_sys_apply_repo_event</code> with <code>field_mapping</code> from <code>source.*</code> (use <code>source.x</code>, not <code>{{input.x}}</code>).</td></tr>
+<tr><td><code>work_item</code> after update, when <code>blocked</code> becomes true</td><td><code>external.connector.slack</code> / <code>email</code></td><td>Escalation notice to owner.</td></tr>
+<tr><td><code>plan</code> after create (awaiting)</td><td><code>external.connector.email</code> / slack</td><td>“Plan ready for approval.”</td></tr>
+<tr><td><code>agent_session</code> after update to <code>paused</code> or <code>done</code></td><td>connector</td><td>“Needs your approval” / “PR opened.”</td></tr>
+<tr><td><code>invite</code> after create</td><td><code>external.connector.email</code> with template <code>pdInvite</code></td><td>Invitation email; the org template is overridable per tenant.</td></tr>
+<tr><td><code>preflight_run</code> after update</td><td>connector</td><td>Notify owners when a release is cleared or blocked.</td></tr>
+</tbody></table></div>
+<p>Chains stop after 5 hops with no error. The longest chain here is repo_event → work_item → notification (3), so there is headroom, but no block should write a table whose event writes back into the same table.</p>
+<div class="tw"><table>
+<thead><tr><th>Schedule</th><th>Target</th><th>Cadence</th><th>Plan need</th></tr></thead>
+<tbody>
+<tr><td><code>flow-snapshot</code></td><td>Glyph <code>pd_snapshot_flow</code></td><td>daily 00:05 tenant time</td><td>Paid (Starter allows 10 per tenant)</td></tr>
+<tr><td><code>sync-sessions</code></td><td>Block <code>pd_sys_sync_session</code></td><td>every 15 min (Starter) or 1 min (Pro)</td><td>Paid. Fallback only; webhooks are the primary signal.</td></tr>
+</tbody></table></div>
+<p>Schedules run as the user who created them, so personal GitHub tokens would resolve to that person. Both targets use the shared <code>github:automation</code> instance. A schedule is per tenant: the bootstrap step (<a href="build-plan.html#onboard">runbook</a>) creates them for each new tenant.</p>
+</main>
+<script src="assets/docs.js?v=3"></script>
+</body>
+</html>

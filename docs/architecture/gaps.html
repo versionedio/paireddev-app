@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PairedDev Gaps</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css?v=3">
+</head>
+<body>
+<main>
+<div class="eyebrow">Gaps between the requirements and the platform</div>
+<h1>What does not map cleanly</h1>
+<p class="lede">22 items found while reading <code>product_req.md</code> against what nostackai exposes through MCP. Each states the requirement, what the platform really offers, the options, and a recommendation. Eight need your decision before we build.</p>
+
+<h2 id="answers">Decisions recorded</h2>
+<p>Your answers to the gap list, and what each changes in the design. Items marked <span class="chip c-warn">to verify</span> are confirmed by a test once the org is built.</p>
+<div class="tw"><table>
+<thead><tr><th>#</th><th>Your decision</th><th>What changes</th></tr></thead>
+<tbody>
+<tr><td>Coding agent</td><td>Meta Muse Code; any coding agent can be plugged in.</td><td>The catalogue has a <code>muse-code</code> connector with the same shape as <code>claude-code</code> (<code>start_task</code>, <code>get_task</code>, <code>setup_workflow</code>, <code>setup_permissions</code>, <code>setup_secret</code>), and also <code>codex</code>, <code>claude</code>, <code>copilot</code>, <code>jules</code>. All pages now say <code>muse-code:main</code>. Blocks call the agent through one setting (<code>coding_agent_instance</code>, default <code>muse-code:main</code>), so swapping agents is a setting, not a rebuild. <a href="#g-stream">G-01</a> stays: any runner connector gives phases, not a step stream. <a href="#g-hooks">G-13</a> gets a new wrinkle, below.</td></tr>
+<tr><td>G-02 · Plan</td><td>Upgrade to paid Pro.</td><td>Schedules, 12 flags, and the large Glyph are available. Production promotion (<a href="#g-prod">G-14</a>) becomes possible. Read the exact limits in the console after the upgrade: <code>get_usage</code> returns the same 403 on a second org's key, so it is a platform bug, not something about this org.</td></tr>
+<tr><td>G-06 · Backlog</td><td>2,000 is plenty; beyond a few hundred is not useful UX.</td><td>Closed. Exact total up to 2,000, then “2,000+” with Prev/Next. No other search backend.</td></tr>
+<tr><td>G-03 · Keys / tokens</td><td>By design: connectors are set ahead; each developer saves their git token in their profile.</td><td>Matches the platform. Personal-method connectors take each user's token through <code>PUT /app/paired-egih/user/updateprofile</code> with <code>connector_credentials</code> for that instance key (the committer name and email are optional; saving replaces what was stored; null disconnects). So the profile screen needs a “Connect GitHub” form for <code>github</code> and <code>muse-code:main</code>, never stored by us. Work a person starts runs as them. Anything started by a webhook or schedule uses <code>github:automation</code> (shared). AI provider keys remain console-only.</td></tr>
+<tr><td>G-04 · Tenants</td><td>A tenant is a customer company. Its admin signs up in PairedDev and the system creates the tenant; members join with a join code via the user/invite/join API.</td><td>MCP has no create-tenant tool, but the app does not need one. Checked in the platform code (<code>app/tenancy</code>): in a multi-tenant org, a sign-up with no tenant id creates a new tenant with that person as its admin (<code>provisionNewTenantWithAdmin</code>); a sign-up that names a tenant id joins it. So onboarding is self-serve <b>provided the org's tenancy mode is <code>multi</code></b> (<a href="#g-tenancymode">G-21</a>; in single or hybrid mode sign-up joins a default tenant instead). The runbook shrinks to <code>pd_adm_bootstrap_tenant</code> plus the admin entering connector secrets in Tenant Settings. <span class="chip c-warn">to verify</span> end to end with a second sign-up once the org is built. Invites and join codes then follow the platform's invite flow, with <code>invite</code> kept only for role and project pre-assignment.</td></tr>
+<tr><td>G-05 · Providers</td><td>Understood.</td><td>Direct Anthropic and Google in v1. Bedrock, Vertex and Foundry hidden behind a flag.</td></tr>
+<tr><td>G-11 · Item ids</td><td>Ids like ITR-118 are created by the app; every entity can have an autoincrement column.</td><td>Confirmed in the platform's column types: <code>autoincrement</code> is auto-generated and cannot be supplied, and <code>formula</code> fields interpolate other fields (<code>{project_key}-{number}</code>; the function is <code>CONCATENATE</code>, not <code>CONCAT</code>). So <code>work_item</code> gets <code>number</code> (autoincrement) and <code>key</code> = <code>{project_key}-{number}</code>, where <code>project_key</code> is a plain string the create block copies from the project (a formula can only read its own row, not the project). The platform id stays internal and is never shown. Three things the docs do not say, so they are checked on first build: that a formula can read an autoincrement value assigned in the same create, that the counter is kept per tenant (needs a second tenant to see), and that it counts up across the whole tenant, so ITR-118 is followed by WEB-119 rather than WEB-1. If a per-project count matters, the fallback is a counter on <code>project</code> updated inside the create block.</td></tr>
+<tr><td>G-14 · Dev tier</td><td>Understood; upgrading to paid.</td><td>We build in dev through MCP, then a console deploy promotes to Production.</td></tr>
+<tr><td>G-21 · Tenancy</td><td>Multi-tenant.</td><td>Confirm the org's mode is <code>multi</code> in Org Settings once. The pack already assumes it.</td></tr>
+<tr><td>G-08 · Realtime</td><td>Sign-in required; channels are limited to the tenant.</td><td>Agreed. Everyone needs a token to open the WebSocket, and the server scopes a channel to the org and tenant. The platform also says anyone in a tenant who names a channel joins it, so a person cannot be kept out of a channel by name alone inside their own tenant. Channels are named <code>board:&lt;project_id&gt;</code> with unguessable ids, and the blocks that publish decide what goes out, never raw rows.</td></tr>
+<tr><td>G-18 · Board as MCP tools</td><td>Not for phase 1.</td><td>Removed from the v1 build plan; stays as a later item.</td></tr>
+<tr><td>G-12 · No-login portal</td><td>Everyone must be logged in.</td><td>Closed. The public (no-login) route is not used at all.</td></tr>
+<tr><td>G-10 · Crew tools</td><td>Every connector is available to agents; needs verification. <b>Verified: yes, through <code>connector.invoke</code>.</b></td><td>Checked in the platform code (<code>connector-invoke-tool.ts</code>, wired in <code>tool-runners.ts</code>). Crews have a generic <code>connector.invoke</code> tool that calls any enabled connector action with the same credentials and allowlist as a Logic Block. It is not in the static tool list because it is built per connector at config time: each tool entry binds one <code>connectorId</code>, <code>actionId</code>, <code>instanceKey</code> and a <code>fieldMapping</code> (values may use <code>{{args.KEY}}</code> from the model). So a crew gets one tool entry per GitHub action it needs (<code>get_file_contents</code>, <code>list_pull_request_files</code>, <code>compare_branch</code>…) and the <code>pd_repo_read</code> Glyph is not needed. A run started by a person uses that person's token on the <code>github</code> instance; a run started by a webhook or schedule must point its tools at <code>github:automation</code> (shared). The built-in Slack post-message tool is a not-yet-implemented stub, so do not use it. <span class="chip c-warn">to verify</span> by creating one crew with a <code>connector.invoke</code> tool and running it.</td></tr>
+<tr><td>G-15 · Domain</td><td><code>paireddev.com</code>, to be set up.</td><td>Allowed Domains gets <code>https://paireddev.com</code> (plus <code>http://localhost:3000</code> for development), and App URL is set to the same. Outbound Allowed Domains stay separate. Production has its own copy of both, configured in the console.</td></tr>
+</tbody></table></div>
+
+<h3 id="explain">The three you asked me to explain</h3>
+<h3 id="x-hooks">G-13 · Hooks live in the repo</h3>
+<p>A hook is a small command the coding agent runs at set points: before it edits a file, after it runs a command, before it commits. PairedDev lets a project define them, and a tenant admin define ones that projects must not remove (for example “never edit <code>.github/workflows</code>”). The agent runs on a GitHub runner and reads its hooks from a file committed in the repository (<code>.claude/settings.json</code> for Claude Code), not from our database.</p>
+<p>The board can write that file, and checks hooks on commits made through the Work tab. But anyone who can push to the repo can edit the file, so the “tenant-admin hooks cannot be weakened by a project” rule cannot be enforced in the repo. We can only detect it: on every sync the board compares the file to what it expects, records an <code>audit_event</code> and shows a banner if it differs. Branch protection with required review on that path makes it hard to change without a second person.</p>
+<div class="callout warn"><b>New with Muse Code.</b> The file name and format are agent-specific. Before building hooks we need to check where Muse Code reads its hooks and whether it supports them. If it does not, hooks become advisory for that agent and the board's own checks (Work-tab commits, plan gates) are the real control. <span class="chip c-warn">to verify</span></div>
+<h3 id="x-metrics">G-07 · Metrics history</h3>
+<p><b>Resolved: not a gap.</b> Each tenant is its own company with its own board, so its charts start when that tenant starts and fill in as it works. Nothing is shared between tenants, and no history is expected before a tenant's first day. The only requirement is that we keep recording moves from the start, because a card row alone only shows where it is now: a <code>lane_transition</code> row on every move and a nightly <code>flow_snapshot</code> of counts per lane. A Glyph computes the charts from those rows, always inside one tenant.</p>
+<p>The prototype's 90-day series is mock data. The empty-state copy on the charts should say “Charts fill in as your team works”, and a demo tenant can be filled by <code>pd_seed_demo</code>.</p>
+<h3 id="x-aws">G-20 · AWS connector</h3>
+<p><b>Resolved.</b> The AWS connector creates the hosting stack once, when a brand new project is created: an S3 bucket, CloudFront, certificate, DNS and an OIDC role for GitHub (for PairedDev itself, <code>paireddev.com</code>). After that, every merge of agent work deploys through workflows, not the connector: the coding agent writes GitHub Actions workflows into the repo, and those build the static export, sync it to S3, and invalidate CloudFront, signing in to AWS through the OIDC role (the connector can look up the OIDC provider). The agent's own setup (<code>setup_workflow</code>, <code>setup_permissions</code>, <code>setup_secret</code>) is separate and runs once per repo. Nothing in the connector needs an update.</p>
+
+<h2 id="decide">Original decision questions</h2>
+<div class="tw"><table>
+<thead><tr><th>#</th><th>Question</th><th>My recommendation</th></tr></thead>
+<tbody>
+<tr><td><a href="#g-stream">G-01</a></td><td>Is a coarse agent session acceptable for v1 (phases from webhooks), or must the Live Session show every step with inline approval?</td><td>v1 coarse on the Claude Code runner; build a crew-based developer agent in phase 2 if step-level control is a must.</td></tr>
+<tr><td><a href="#g-plan">G-02</a></td><td>Which nostackai plan is the org on?</td><td>Pro. Schedules, enough flags and Glyph volume need a paid plan.</td></tr>
+<tr><td><a href="#g-list">G-06</a></td><td>Is “page 2 of 3” required beyond ~2,000 items per tenant?</td><td>No. Show an exact total up to 2,000, then “2,000+” with Prev/Next.</td></tr>
+<tr><td><a href="#g-public">G-12</a></td><td>Must the portal work without signing in?</td><td>Require sign-in; requesters self-register on an allowed email domain or by invite.</td></tr>
+<tr><td><a href="#g-hooks">G-13</a></td><td>Accept that tenant-admin hooks are locked in the app and checked for drift in the repo, not locked in the repo itself?</td><td>Yes, plus branch protection on <code>.claude/</code>.</td></tr>
+<tr><td><a href="#g-byo">G-05</a></td><td>Ship v1 with direct Anthropic and Google only?</td><td>Yes. Hide Bedrock/Vertex/Foundry behind a flag until the platform supports them.</td></tr>
+<tr><td><a href="#g-delivery">G-19</a></td><td>Can an item belong to only one delivery at a time?</td><td>Yes (matches the single delivery chip in the drawer).</td></tr>
+<tr><td><a href="#g-domains">G-15</a></td><td>What is the front-end domain (CORS and App URL)?</td><td>Needed before the first deployed load; localhost works meanwhile.</td></tr>
+</tbody></table></div>
+
+<h2 id="all">All gaps</h2>
+<div class="tw"><table>
+<thead><tr><th>#</th><th>Gap</th><th>Severity</th><th>Area</th></tr></thead>
+<tbody>
+<tr><td>G-01</td><td>No step-level agent stream or mid-session approval</td><td><span class="chip sev-high" style="--c:var(--red)">high</span></td><td>Agents</td></tr>
+<tr><td>G-02</td><td>Plan and limits unknown (<code>get_usage</code> fails)</td><td><span class="chip" style="--c:var(--red)">high</span></td><td>Platform</td></tr>
+<tr><td>G-06</td><td>Backlog totals, search and numbered pages</td><td><span class="chip" style="--c:var(--red)">high</span></td><td>Data</td></tr>
+<tr><td>G-13</td><td>Hooks run in the repo; org lock not enforceable there</td><td><span class="chip" style="--c:var(--red)">high</span></td><td>Agents</td></tr>
+<tr><td>G-03</td><td>Write-only provider keys from inside the app</td><td><span class="chip" style="--c:var(--warn)">medium</span></td><td>Tenancy</td></tr>
+<tr><td>G-04</td><td>Tenant creation and secrets are console-only</td><td><span class="chip" style="--c:var(--warn)">medium</span></td><td>Tenancy</td></tr>
+<tr><td>G-05</td><td>Bedrock / Vertex / Foundry routing</td><td><span class="chip" style="--c:var(--warn)">medium</span></td><td>AI</td></tr>
+<tr><td>G-07</td><td>Metrics history accrues per tenant (resolved: by design)</td><td><span class="chip" style="--c:var(--ok,var(--green))">closed</span></td><td>Data</td></tr>
+<tr><td>G-11</td><td>Ids like ITR-118 are not suppliable</td><td><span class="chip" style="--c:var(--warn)">medium</span></td><td>Data</td></tr>
+<tr><td>G-12</td><td>No-login portal has no tenant context</td><td><span class="chip" style="--c:var(--warn)">medium</span></td><td>Tenancy</td></tr>
+<tr><td>G-14</td><td>MCP is dev-tier only; production is a separate step</td><td><span class="chip" style="--c:var(--warn)">medium</span></td><td>Platform</td></tr>
+<tr><td>G-16</td><td>Platform admin policy bypasses governed tables</td><td><span class="chip" style="--c:var(--warn)">medium</span></td><td>Access</td></tr>
+<tr><td>G-18</td><td>Board operations are not MCP tools</td><td><span class="chip" style="--c:var(--warn)">medium</span></td><td>Agents</td></tr>
+<tr><td>G-21</td><td>Tenancy mode of the org cannot be read</td><td><span class="chip" style="--c:var(--warn)">medium</span></td><td>Tenancy</td></tr>
+<tr><td>G-08</td><td>SSE requested; WebSocket provided</td><td><span class="chip" style="--c:var(--teal)">low</span></td><td>Realtime</td></tr>
+<tr><td>G-09</td><td>GitHub App auth unsupported</td><td><span class="chip" style="--c:var(--teal)">low</span></td><td>Connectors</td></tr>
+<tr><td>G-10</td><td>Crews reach connectors through <code>connector.invoke</code> (one tool per action; resolved)</td><td><span class="chip" style="--c:var(--warn)">medium</span></td><td>Agents</td></tr>
+<tr><td>G-15</td><td>Allowed domains, App URL, WS endpoint unset</td><td><span class="chip" style="--c:var(--teal)">low</span></td><td>Org</td></tr>
+<tr><td>G-17</td><td>Requirement text out of date (OpenAI, “org”)</td><td><span class="chip" style="--c:var(--teal)">low</span></td><td>Docs</td></tr>
+<tr><td>G-19</td><td>Delivery membership cardinality</td><td><span class="chip" style="--c:var(--teal)">low</span></td><td>Data</td></tr>
+<tr><td>G-20</td><td>AWS connector scope (resolved: hosting stack; deploys via agent-written GitHub Actions)</td><td><span class="chip" style="--c:var(--green)">closed</span></td><td>Connectors</td></tr>
+<tr><td>G-22</td><td>Logic-Block action names for ACL unverified</td><td><span class="chip" style="--c:var(--teal)">low</span></td><td>Access</td></tr>
+</tbody></table></div>
+
+<h2 id="high">High severity</h2>
+
+<h3 id="g-stream">G-01 · Live Session: no step stream, no mid-session approval</h3>
+<p><b>Requirement.</b> Sessions stream step by step (read, edit, test, PR). A hook set to <code>ask</code> halts the session until a human approves or denies inline. “A poll-and-replace implementation will read wrong.”</p>
+<p><b>Platform.</b> The Claude Code connector is two actions, <code>start_task</code> and <code>get_task</code>, plus one-time repo setup. It triggers a GitHub Actions workflow on a runner; the board learns about it through <code>get_task</code> state and GitHub webhooks (<code>push</code>, <code>pull_request</code>, <code>check_suite</code>, <code>workflow_run</code>). There is no per-tool-call stream and a headless runner cannot wait for a person. The WebSocket gateway does stream every turn of a nostackai <b>Crew</b>, and crews have a real tool-approval pause with <code>POST /agents/decision</code>.</p>
+<ul>
+<li><b>A · Runner only.</b> Session panel shows phases (queued, running, commit pushed, PR opened, checks). Protected-path rules become plan-time approval: the plan lists them and approving the plan approves them; other hooks are <code>block</code>.</li>
+<li><b>B · Crew developer agent.</b> A nostackai crew edits files through GitHub connector calls (via a Glyph tool). Full per-turn stream and inline approval, exactly the design. It is a nostackai agent on an Anthropic model, not Claude Code, so it has no local test runner or shell.</li>
+<li><b>C · Hybrid.</b> Plan by crew, code by runner (A) in v1; add B behind the <code>live-session</code> flag later.</li>
+</ul>
+<p><b>Recommendation.</b> C. It delivers requirements 2, 4 and 5 fully and requirement 3 partially. Decision needed: is step-level fidelity a launch requirement?</p>
+
+<h3 id="g-plan">G-02 · Plan and limits unknown</h3>
+<p><b>Observed.</b> <code>get_usage</code> failed with a 403 (“Authorization header requires Credential…”), so I cannot see the org's plan. The same call fails the same way on a different org's key, so this is a bug in the MCP tool, not a property of this org. Read the plan in the console.</p>
+<p><b>Why it matters.</b> Schedules are paid only (Starter: 10 per tenant, 15-minute minimum; Pro: 100, 1-minute). Free allows 10 feature flags and we propose 12. Free allows 10 Glyph runs a day and 250 a month; Starter 200 and 5,000. A nightly snapshot per tenant plus metrics calls would exhaust Free almost immediately. Large Glyphs are Pro only.</p>
+<p><b>Options.</b> Confirm the plan in the console; or trim to 10 flags and drop schedules (sessions then rely on webhooks only; no flow history). <b>Recommendation.</b> Pro for the build; the flag list is cheap to trim.</p>
+
+<h3 id="g-list">G-06 · Backlog: totals, search, numbered pages</h3>
+<p><b>Requirement.</b> “1 – 50 of 127 items”, “page 2 of 3”, text search, 7 combinable filters, built for hundreds of items, one server-side query.</p>
+<p><b>Platform.</b> Lists use a continuation token (cursor), not offsets. A list can stop after about 2,000 scanned records. Counts are a separate route with a <code>capped</code> flag. <code>list_entities</code> has attribute filters (<code>contains</code>, <code>begins</code>, comparisons) but no full-text search and no “total matching” beside a page, unless the instance has the Enterprise search add-on (OpenSearch), which adds <code>?q=</code> search, <code>totalcount</code> and facets. Without it those return an empty result with a note.</p>
+<p><b>Plan.</b> <code>pd_dev_list_items</code> uses indexed lookups for project and lane, attribute filters for the rest, walks cursors to build the requested page, and returns <code>total</code> plus <code>capped</code>. Exact up to ~2,000 matching rows; beyond that the UI shows “2,000+” and Prev/Next. Tags are stored as one searchable string.</p>
+<p><b>Decision.</b> Is that acceptable? Larger tenants would need a different search backend, which nostackai does not offer through MCP.</p>
+
+<h3 id="g-hooks">G-13 · Hooks live in the repo</h3>
+<p><b>Requirement.</b> Hooks configured per project; org-managed hooks cannot be widened by a project; <code>commit_files</code> is checked against hooks.</p>
+<p><b>Platform.</b> Hooks for Claude Code are <code>.claude/settings.json</code> in the repository, run by the runner. The connector's <code>setup_workflow</code> only commits the GitHub Actions workflow file (and leaves an existing copy alone); it does not write the hooks file, so the board writes that itself. The board can render the file from <code>hook</code> rows and commit it (<code>commit_files</code>), and can check hooks for commits made through the Work tab, but it cannot stop someone with repo write access editing the file.</p>
+<p><b>Mitigations.</b> Render tenant-admin hooks first and team hooks after; compare the repo copy on every sync and write an <code>audit_event</code> plus a banner on drift; use <code>set_branch_protection</code> with required review on <code>.claude/**</code>. <b>Recommendation.</b> Accept this; a repo-level lock is outside the platform's control.</p>
+
+<h2 id="medium">Medium severity</h2>
+
+<h3 id="g-3">G-03 · Write-only provider keys from inside the app</h3>
+<p><b>Requirement.</b> The org connects Anthropic or Google from a credential modal; the key is write-only.</p>
+<p><b>Platform.</b> No MCP tool sets keys. Tenant admins enter them in the console (Tenant Settings → AI). An app-side route <code>/app/paired-egih/tenant/settings</code> exists for tenant-admin tokens, but I have not verified that the AI-key group is writable through it. <b>Plan.</b> v1 shows provider status (connected / not) and a deep link to the console; test the app-side route once the org is built and move the modal over only if it works.</p>
+
+<h3 id="g-tenant">G-04 · Tenant creation is console-only</h3>
+<p>MCP can list tenants (<code>list_org_tenants</code> → <code>2vrdf</code>) but not create one. The app itself creates a tenant when a new admin signs up without a tenant id in a multi-tenant org (see the decision above), so no console step is needed per tenant, only <code>pd_adm_bootstrap_tenant</code> after sign-up. Connector secrets, AI keys, webhook secrets and SSO are still console-only. The runbook is in the <a href="build-plan.html#onboard">build plan</a>.</p>
+
+<h3 id="g-byo">G-05 · Bedrock / Vertex / Foundry</h3>
+<p>Requirement 7 and section 13 offer Anthropic routed through a cloud gateway. The AI provider catalogue has protocol-level entries (<code>anthropic</code>, <code>openai</code>, <code>gemini</code>) and custom providers with a base URL (the case study uses one for Kimi). Bedrock needs AWS request signing and Vertex needs Google OAuth, neither of which a key-plus-base-URL provider can do. Foundry may work if it speaks the Anthropic protocol with a key; untested. <b>Plan.</b> Ship without gateways; keep the <code>bedrock-routing</code> flag off; ask the platform team.</p>
+
+<h3 id="g-metrics">G-07 · Metrics history</h3>
+<p>Cumulative flow, cycle time, throughput and burndown need per-day history, and item rows only hold current state. We record <code>lane_transition</code> on every move and a nightly <code>flow_snapshot</code>, and compute everything in a Glyph, per tenant. Each tenant is a separate company and board, so its charts simply start on its first day. <b>Closed.</b> A small Glyph has a 30-second ceiling, so very large ranges may need the Pro large Glyph.</p>
+
+<h3 id="g-id">G-11 · Ids like ITR-118</h3>
+<p>Record ids are generated by the platform and cannot be supplied. Each entity can have an <code>autoincrement</code> column; with a <code>formula</code> column the readable key is <code>{project_key}-{number}</code>. To check on first build: the counter is per tenant, and it is shared across projects in a tenant. Fallback: a counter on <code>project</code> incremented inside the create block.</p>
+
+<h3 id="g-public">G-12 · Portal without sign-in</h3>
+<p>The requirements call the portal public. nostackai supports no-login <code>create</code> and <code>read</code> on <code>/app/{org}/public/{entity}</code>, but a no-login request carries no token, so there is no tenant to resolve, and reading needs a restricted projection and an exact-match index. Voting and “My submissions” need identity anyway. <b>Recommendation.</b> Requesters sign in (invite or allowed email domain per tenant), landing on the least-privileged <code>pd-requester</code> policy.</p>
+
+<h3 id="g-prod">G-14 · Dev tier only</h3>
+<p>Every MCP session is dev-tier. Promotion needs a paid plan, a provisioned Production environment, and a console deploy (publish → activate, with rollback). Feature-flag definitions and all assets are created in dev and reach production the same way; only the on/off switch works in prod directly. Allowed Domains and App URL are separate per environment.</p>
+
+<h3 id="g-admin">G-16 · Admin policy bypass</h3>
+<p>The built-in <code>adminacl</code> is wildcard on wildcard, so a tenant admin can write governed tables directly, skipping the gate blocks. Options: accept (admins are trusted; the platform's own audit still records it), or give admins <code>pd-admin</code> instead, which breaks nothing in PairedDev but may limit console tenant-management actions. <b>Recommendation.</b> Accept, never assign <code>adminacl</code> to an agent, document it.</p>
+
+<h3 id="g-mcp">G-18 · Board as MCP tools</h3>
+<p>The requirements say the same operations “should exist as MCP tools so Claude Code can drive the board”. The nostackai MCP is design-time only and cannot read or write records. Claude Code would instead call the tenant's REST / Logic Block routes with an agent service token (the <code>pd-agent</code> policy). <b>Plan.</b> Ship a small repo skill describing those calls; a bespoke MCP server wrapping them is a separate project.</p>
+
+<h3 id="g-tenancymode">G-21 · Tenancy mode</h3>
+<p>Org tenancy is single, hybrid or multi, and moving up is a one-way door. <code>get_org_info</code> does not show the mode; one tenant exists. Confirm in Org Settings that it is <b>multi</b> before promising multiple customers.</p>
+
+<h2 id="low">Low severity</h2>
+<h3 id="g-ws">G-08 · SSE → WebSocket</h3>
+<p>The gateway is WebSocket with channels private to org and tenant. Cards use Logic Blocks with <code>notifyall</code>; crew runs stream through <code>crew_run</code>. Channels are not private inside a tenant, so names are unguessable and blocks authorise. The front-end wraps this behind the same adapter shape the skills call for.</p>
+<h3 id="g-app">G-09 · GitHub App auth</h3>
+<p>Known and recorded in the requirements. Personal and shared fine-grained PATs work today.</p>
+<h3 id="g-crewtool">G-10 · Crew tools</h3>
+<p><b>Resolved: not a gap.</b> The static tool list shows data read/write, crew delegate, ask-a-human, HTTP, vector search, document text, calculator, date, <code>glyph.invoke</code> and a Slack stub, but <code>connector.invoke</code> is a real tool built per connector action when the crew is configured. Crews read the repo with <code>connector.invoke</code> tools bound to GitHub actions, so the <code>pd_repo_read</code> Glyph is dropped. Tool entries are fixed at config time, so a crew that needs five repo actions has five tool entries.</p>
+<h3 id="g-domains">G-15 · Domains</h3>
+<p>Allowed Domains, outbound domains and App URL are empty. CORS fails from any real domain until set. The WebSocket URL is not in <code>get_org_info</code>.</p>
+<h3 id="g-reqs">G-17 · Requirement text to update</h3>
+<ul>
+<li>Section 13 says OpenAI cannot be brokered. The catalogue includes OpenAI and a Codex coding-agent connector.</li>
+<li>“Org” means tenant here (see the HLD note).</li>
+<li>The Pipeline view's hosts (<code>int.nostack.app</code>, …) are mock values; real environments come from project settings.</li>
+</ul>
+<h3 id="g-delivery">G-19 · Deliveries</h3>
+<p>Modelled as one delivery per item (<code>work_item.delivery_id</code>). A many-to-many join is easy to add but the drawer shows one chip.</p>
+<h3 id="g-aws">G-20 · AWS connector</h3>
+<p>The connector does CloudFormation (<code>create_stack</code>, <code>update_stack</code>, <code>describe_stacks</code>, <code>describe_stack_events</code>, <code>delete_stack</code>) plus certificate, hosted-zone and OIDC lookups. <b>Closed.</b> It creates the hosting stack only. Deploys are GitHub Actions workflows written by the coding agent, signing in to AWS through an OIDC role.</p>
+<h3 id="g-acl">G-22 · Block action names</h3>
+<p>The ACL guide documents entity action names (<code>listvideos</code>) and wildcard prefixes but not the exact action string a Logic Block gets. I will create one block and read back the policy list before writing the prefix grants.</p>
+</main>
+<script src="assets/docs.js?v=3"></script>
+</body>
+</html>

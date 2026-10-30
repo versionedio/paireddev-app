@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PairedDev Backend Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css?v=3">
+</head>
+<body>
+<main>
+<div class="eyebrow">PairedDev · backend on nostackai · org paired-egih</div>
+<h1>Backend architecture pack</h1>
+<p class="lede">The design for PairedDev's backend, built only through the nostackai MCP: entities, logic blocks, glyphs, agent crews, events, connectors, AI providers and access. Multi-tenant, so many customer companies share one deployment.</p>
+
+<div class="callout warn"><b>Status: design only.</b> Nothing has been created in the org yet. <code>list_entities</code> shows only the platform's seven built-in tables; there are no logic blocks, glyphs, crews or connectors; tenant <code>2vrdf</code> has one admin user and no AI provider. This pack is the plan we agree on before building.</div>
+
+<div class="stat">
+<div><b>27</b><span>entities</span></div>
+<div><b>~55</b><span>logic blocks</span></div>
+<div><b>5</b><span>glyphs</span></div>
+<div><b>3</b><span>agent crews</span></div>
+<div><b>7</b><span>connectors</span></div>
+<div><b>12</b><span>feature flags</span></div>
+<div><b>22</b><span>gaps found</span></div>
+</div>
+
+<h2>Read in this order</h2>
+<div class="cards">
+<a class="card" href="hld.html"><h3>1 · HLD</h3><p>Context, layers, multi-tenancy, card lifecycle, end-to-end sequence, how “agents never sign off” is enforced, webhooks, realtime, metrics.</p></a>
+<a class="card" href="data-model.html"><h3>2 · Entities</h3><p>ER diagram and the 27 tables: fields, lookups, who may write, indexes.</p></a>
+<a class="card" href="backend-assets.html"><h3>3 · Logic blocks, glyphs, agents</h3><p>Block catalogue by access tier, the five Glyphs, three crews, events and schedules.</p></a>
+<a class="card" href="integrations.html"><h3>4 · Connectors, AI, access</h3><p>GitHub, Muse Code, Slack, Email, S3, AWS. Providers. ACL policies. Flags. Per-tenant setup.</p></a>
+<a class="card" href="api-map.html"><h3>5 · Requirement map</h3><p>Every business requirement, endpoint and screen mapped to an asset, with status.</p></a>
+<a class="card" href="gaps.html"><h3>6 · Gaps</h3><p>Where the requirements and the platform disagree, with options. Eight decisions needed.</p></a>
+<a class="card" href="build-plan.html"><h3>7 · Build plan</h3><p>Phases, MCP calls, checks, and the new-tenant runbook.</p></a>
+</div>
+
+<h2>The design in five points</h2>
+<ol>
+<li><b>Tables never take direct writes for governed data.</b> Items, checklists, plans, sessions and audit are changed only by Logic Blocks, so gates and “humans only” rules are enforced on the server.</li>
+<li><b>Access is by block-name prefix</b> (<code>pd_req_*</code>, <code>pd_dev_*</code>, <code>pd_own_*</code>, <code>pd_adm_*</code>, <code>pd_agt_*</code>) because platform ACL cannot see request bodies and has a size cap.</li>
+<li><b>Agents are a connector and crews, not a back door.</b> Muse Code runs on a GitHub runner; crews plan, review and pre-flight but only return results. Blocks write them.</li>
+<li><b>GitHub drives card status.</b> Webhooks land in an append-only table, then one block applies each event idempotently.</li>
+<li><b>History is recorded from day one</b> (transitions and nightly snapshots) because the analytics cannot be rebuilt later.</li>
+</ol>
+
+<h2>Biggest things to know</h2>
+<ul>
+<li><b>Live Session fidelity.</b> The runner connector gives phases, not a step-by-step stream or inline hook approval. I recommend a hybrid; see <a href="gaps.html#g-stream">G-01</a>.</li>
+<li><b>Backlog scale.</b> Exact totals and page numbers work to about 2,000 rows per tenant; see <a href="gaps.html#g-list">G-06</a>.</li>
+<li><b>Plan tier is unknown.</b> <code>get_usage</code> fails over MCP, and schedules, flags and Glyph volume depend on the plan; see <a href="gaps.html#g-plan">G-02</a>.</li>
+<li><b>Console-only steps</b> remain: creating tenants, AI keys, connector secrets, webhook secrets.</li>
+</ul>
+
+<h2>Also done in the repo</h2>
+<ul>
+<li>The 22 front-end skills from <code>design/skills</code> are installed in <code>.claude/skills/</code> and <code>CLAUDE.md</code> now points to them, so future sessions load them automatically. The backend design follows them where they touch it: feature flags, one API client with typed errors, request ids, config-driven screens.</li>
+</ul>
+
+<p class="mono" style="color:var(--t4);font-size:13px;margin-top:36px">Diagrams are Mermaid, loaded from jsDelivr, so the pages need an internet connection to draw them. Source is in each page's <code>pre.mermaid</code> blocks.</p>
+</main>
+<script src="assets/docs.js?v=3"></script>
+</body>
+</html>
