@@ -90,9 +90,9 @@ erDiagram
 <div class="tw"><table>
 <thead><tr><th>Entity</th><th>Key fields</th><th>Lookups</th><th>Notes</th></tr></thead>
 <tbody>
-<tr><td><code>audit_event</code></td><td>actor_kind, actor_id, action, target_key, branch, detail, outcome <code>allowed|denied</code></td><td>item_id</td><td><code>excludeOps: ["update","delete"]</code>. Requirement 10. Denied attempts are logged too.</td></tr>
-<tr><td><code>lane_transition</code></td><td>from_lane, to_lane, actor_kind, actor_id, project_id, sprint_id, at</td><td>item_id</td><td><code>excludeOps: ["update","delete"]</code>. Source of truth for cycle time, throughput, burndown, velocity.</td></tr>
-<tr><td><code>repo_event</code></td><td>delivery_id (X-GitHub-Delivery), event_type, action, branch, pr_number, pr_url, head_sha, check_state, applied</td><td>—</td><td>Webhook landing table. Unique on delivery_id, so a re-delivery is ignored. <code>excludeOps: ["delete"]</code>.</td></tr>
+<tr><td><code>audit_event</code></td><td>actor_kind, actor_id, action, target_key, branch, detail, outcome <code>allowed|denied</code></td><td>item_id</td><td>no update or delete grant in ACL (the platform has no <code>excludeOps</code> option). Requirement 10. Denied attempts are logged too.</td></tr>
+<tr><td><code>lane_transition</code></td><td>from_lane, to_lane, actor_kind, actor_id, project_id, sprint_id, at</td><td>item_id</td><td>no update or delete grant in ACL (the platform has no <code>excludeOps</code> option). Source of truth for cycle time, throughput, burndown, velocity.</td></tr>
+<tr><td><code>repo_event</code></td><td>delivery_id (X-GitHub-Delivery), event_type, action, branch, pr_number, pr_url, head_sha, check_state, applied</td><td>—</td><td>Webhook landing table. Unique on delivery_id, so a re-delivery is ignored. <code>no delete grant in ACL</code>.</td></tr>
 <tr><td><code>flow_snapshot</code></td><td>day, counts (json per lane)</td><td>project_id</td><td>Written nightly. History cannot be rebuilt later, so the schedule starts at go-live.</td></tr>
 </tbody></table></div>
 
@@ -115,7 +115,7 @@ erDiagram
 <thead><tr><th>Entity</th><th>Index</th><th>Why</th></tr></thead>
 <tbody>
 <tr><td><code>work_item</code></td><td>lookup on <code>project_id</code> with <code>lane</code> in the sort key; lookup on <code>owner_id</code>; lookup on <code>sprint_id</code>; lookup on <code>delivery_id</code></td><td>Board per project, my cards, sprint burndown, delivery view without scanning.</td></tr>
-<tr><td><code>work_item</code></td><td>unique on <code>branch</code>; <code>indexFields</code> on <code>pr_url</code></td><td>Webhook correlation must be exact (one branch ↔ one card).</td></tr>
+<tr><td><code>work_item</code></td><td><code>indexFields</code> on <code>branch</code> and on <code>pr_url</code> (not unique: rows without a branch would collide)</td><td>Webhook correlation must be exact (one branch ↔ one card).</td></tr>
 <tr><td><code>work_item_vote</code></td><td>unique (<code>item_id</code>, <code>voter_user_id</code>)</td><td>One vote per person.</td></tr>
 <tr><td><code>checklist_item, activity_entry, plan, agent_session, session_step</code></td><td>lookup on <code>item_id</code> / <code>session_id</code></td><td>Drawer loads one card in one call per tab.</td></tr>
 <tr><td><code>lane_transition</code></td><td>lookup on <code>item_id</code>; audit-style index on created time</td><td>Metrics read by time range.</td></tr>

@@ -195,7 +195,7 @@ flowchart TB
 <ul>
 <li>Layer 1 works because each restricted operation is its own Logic Block, so it has its own action name a policy can deny.</li>
 <li>Governed entities (<code>work_item</code>, <code>checklist_item</code>, <code>audit_event</code>, <code>plan</code>, <code>agent_session</code>) have direct create/update/delete denied for every role. Blocks are the only route in, which is the board-policy pattern from the case study.</li>
-<li><code>audit_event</code> is created with <code>excludeOps: ["update","delete"]</code>, so append-only is a property of the table's API, not a convention.</li>
+<li><code>audit_event</code> is created with no update or delete grant in ACL (the platform has no <code>excludeOps</code> option), so append-only is enforced by access control rather than by the table itself (the built-in admin policy can still edit it, G-16).</li>
 </ul>
 
 <h2 id="webhook">7 · GitHub events keep cards in step</h2>

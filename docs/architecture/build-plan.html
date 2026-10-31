@@ -38,6 +38,13 @@ flowchart LR
 <li>Adopt connectors with <code>setup_connector</code>: <code>github</code> (named <code>github</code>, personal), <code>github</code> (named <code>automation</code>, shared), <code>muse-code</code> (<code>main</code>), <code>slack</code> (<code>notify</code>), <code>email</code>, <code>s3</code>. Then <code>describe_connector</code> each to confirm exact action fields (merge SHA, create_branch ref).</li>
 </ul>
 
+<div class="callout ok" id="p0-done"><b>P0 done (2026-10-30).</b> Run against org <code>paired-egih</code>, tenant <code>2vrdf</code>.
+<ul>
+<li><b>Org:</b> tenancy is <code>multi</code> (G-21 closed). App URL, Allowed Domains and outbound domains are still empty; WebSocket endpoint is <code>wss://ws-dd1use2.nostackai.com</code>.</li>
+<li><b>Connectors adopted</b> (names are required on every adoption, so the bare <code>github</code> from the design became <code>github:users</code>): <code>github:users</code> (personal), <code>github:automation</code> (shared), <code>muse-code:main</code>, <code>slack:notify</code>, <code>email:notify</code> (already ready, no credentials), <code>s3:files</code>. Wherever the pages say <code>github</code> for the personal instance, read <code>github:users</code>. The GitHub method (personal or shared) and owner are set by the tenant admin in the console.</li>
+<li><b>Spike, now deleted</b> (entity, Glyph and 4 records): <code>autoincrement</code> counts 1, 2, 3, 4 across projects; a <code>formula</code> read in the same create sees the new number (<code>{project_key}-{number}</code> gave <code>ITR-3</code>); entity formulas are <b>templates, not functions</b> (<code>CONCATENATE(...)</code> was stored as text) and are <b>computed once at write time</b>, so a wrong formula is not fixed for old rows. Every entity needs a string field called <code>name</code>.</li>
+<li><b>Not settled:</b> whether the counter is per tenant (one tenant exists), the plan limits (read in the console), and the exact ACL action string for a Logic Block (checked with the first real block in P2).</li>
+</ul></div>
 <h2 id="p1">P1 · Entities and flags</h2>
 <ol>
 <li><code>create_entity</code> in dependency order: member → project → project_group → project_group_member → sprint → delivery → work_item → work_item_worker / vote / dependency → checklist_item → activity_entry → audit_event → lane_transition → flow_snapshot → repo_event → plan → agent_session → session_step → session_gate → hook → project_skill → preflight_run → retro_digest → permission_cell → notification_pref → invite.</li>
@@ -46,6 +53,13 @@ flowchart LR
 </ol>
 <p><b>Check:</b> <code>list_entities</code> shows 27 new entries plus the 7 platform ones; each lookup target exists; no entity has more than 5 lookups.</p>
 
+<div class="callout ok" id="p1-done"><b>P1 done (2026-10-30).</b> Plan is Pro: <code>get_usage</code> now works (Glyphs 500 runs a day, 10,000 a month; flags unlimited).
+<ul>
+<li><b>27 entities created</b> in five waves; every lookup target exists and none has more than 5 lookups (<code>work_item</code> has 4, <code>preflight_run</code>, <code>lane_transition</code>, <code>activity_entry</code>, <code>agent_session</code> and others 2).</li>
+<li><b>12 flags created</b>, all boolean. <code>portal</code> and <code>show-ai-score</code> are on; the other ten are off; <code>seed-demo</code> is not overridable by tenants. Note: an enabled flag serves its <i>fallthrough</i>, which starts as off, so “on by default” needs fallthrough set to on (done for those two).</li>
+<li><b>Changes from the design:</b> every entity has a <code>name</code>; <code>excludeOps</code> does not exist, so append-only tables (<code>audit_event</code>, <code>lane_transition</code>, <code>repo_event</code>) are protected only by ACL, which means no policy except the writing blocks may be granted update or delete (the built-in <code>adminacl</code> can still do both, see G-16). Uniqueness on <code>work_item.branch</code> and <code>pr_url</code> became ordinary indexes (<code>by_branch</code>, <code>by_pr_url</code>), because rows without a branch would collide. Enums store <code>sprint.close_choice</code> as <code>carry|backlog</code>. JSON values are strings.</li>
+<li><b>To handle in P3:</b> every entity's default view returns only <code>id</code> from the REST routes. Each read route needs a named view with the fields the screens use.</li>
+</ul></div>
 <h2 id="p2">P2 · Access and bootstrap</h2>
 <ol>
 <li><code>create_tenant_acl_policy</code>: <code>pd-requester</code>, <code>pd-dev</code>, <code>pd-owner</code>, <code>pd-admin</code>, <code>pd-agent</code>. Deny direct create/update/delete on governed entities by simply not granting them.</li>
@@ -55,6 +69,14 @@ flowchart LR
 </ol>
 <p><b>Check:</b> <code>list_tenant_acl_policies</code>; <code>invoke_glyph</code> output lists permission cells created.</p>
 
+<div class="callout warn" id="p2-done"><b>P2 done except one step (2026-10-30).</b>
+<ul>
+<li><b>Policies created in tenant <code>2vrdf</code>:</b> <code>pd-requester</code>, <code>pd-dev</code>, <code>pd-owner</code>, <code>pd-admin</code>, <code>pd-agent</code>. Each is standalone (a user needs only one). Reads on all entities for dev and above; no policy grants create, update or delete on governed tables. The prefix grants are <code>createpd_req_*</code>, <code>createpd_dev_*</code>, <code>createpd_own_*</code>, <code>createpd_adm_*</code>, <code>createpd_agt_*</code>.</li>
+<li><b>Default for new users:</b> <code>pd-requester</code> (least privilege: submit and vote). Set with <code>set_default_member_access</code>. Raise anyone with <code>assign_user_acl</code>.</li>
+<li><b>Glyph <code>pd_bootstrap_tenant</code>:</b> created, published and run. It created 20 permission cells (agent sign-off, release and invite locked off) and 3 tenant-admin hooks; a second run created nothing, so it is safe to repeat.</li>
+<li><b>Not done:</b> giving the existing tenant admin <code>pd-admin</code>. The platform blocked <code>assign_user_acl</code> as a permission grant, so it needs your approval (or the console). The admin keeps <code>adminacl</code> in the meantime.</li>
+<li><b>G-22 still open:</b> the action name for a Logic Block is not documented. The platform's own example of a prefix grant is <code>createwf_*</code>, so the policies assume <code>create</code> plus the block name. I could not prove it: calling a block needs the org's client id and API key from the console. If it is wrong, users are refused (the safe direction) and one policy edit fixes it. Check it with the first sign-in.</li>
+</ul></div>
 <h2 id="p3">P3 · Portal and board</h2>
 <ol>
 <li>Create blocks: submit_request, vote_request, list_requests, list_items, get_item, move_item, set_owner, set_workers, advance_item, signoff_checklist, get_checklist, send_prompt, bulk_items, add/remove_dependency, get_audit.</li>
@@ -63,6 +85,14 @@ flowchart LR
 </ol>
 <p><b>Check:</b> <code>test_logicblock</code> for each happy path and each rejection (agent sign-off → 403, gate closed → 409, duplicate vote → toggle). Writes are real, so test on tenant <code>2vrdf</code> only.</p>
 
+<div class="callout warn" id="p3-start"><b>P3 started (2026-10-30): 3 of about 55 blocks.</b> <code>pd_req_submit_request</code>, <code>pd_req_vote_request</code> and <code>pd_req_list_requests</code> are created and dry-run tested. Reads are real in a dry run; writes are stubs, so item ids, the project code and the submitter email show empty there. A real write test needs a signed-in user and the org's client id and API key from the console.
+<ul>
+<li><b>How a block is written:</b> <code>inputSchema</code> declares the body fields; a branch of steps runs only when a <code>condition</code> lists it; an <code>end</code> step sets the response (<code>output: "{{step}}"</code>). The caller is <code>{{context.userId}}</code> and <code>{{context.email}}</code>; flags arrive as <code>{{params.flags.key}}</code> and were already evaluated correctly in the dry run.</li>
+<li><b>Errors:</b> there is no step that returns an HTTP error status. A refused request returns <code>{"error":"title_too_short"}</code> with a success status, so the front end's API layer must treat a body with <code>error</code> as a typed error (G-26).</li>
+<li><b>Limits:</b> 20 steps and 500 list items per block, so the larger blocks (<code>pd_dev_get_item</code>, backlog list) must be split or use a Glyph.</li>
+<li><b>Not yet applied:</b> <code>pd_req_list_requests</code> accepts <code>project_id</code> but does not filter by it yet; the project and group scoping comes with the member and project blocks.</li>
+<li><b>Maybe fixable:</b> the platform's entity format does list an <code>excludeOps</code> setting, which the create tool rejects. <code>import_metadata</code> may accept it, which would make the audit tables truly append-only. To try before P4.</li>
+</ul></div>
 <h2 id="p4">P4 · GitHub and webhooks</h2>
 <ol>
 <li><code>set_connector_webhook_landing</code> for the five GitHub events into <code>repo_event</code> (insert).</li>
